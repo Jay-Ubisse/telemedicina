@@ -48,6 +48,10 @@ export default function UssdPage() {
     setStep("MENU");
   }
 
+  function goDashboard() {
+    router.push("/dashboard");
+  }
+
   function submitCurrentStep() {
     const value = input.trim();
 
@@ -222,6 +226,13 @@ export default function UssdPage() {
                 <p>10. Confirmação</p>
               </div>
             </div>
+            <Button
+              variant="default"
+              className="hidden md:block"
+              onClick={goDashboard}
+            >
+              Ver dashboard
+            </Button>
           </div>
 
           <UssdShell>
@@ -483,6 +494,13 @@ export default function UssdPage() {
             )}
           </UssdShell>
         </div>
+        <Button
+          variant="default"
+          className="block md:hidden"
+          onClick={goDashboard}
+        >
+          Ver dashboard
+        </Button>
       </PageShell>
     </main>
   );
