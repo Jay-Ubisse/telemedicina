@@ -1,6 +1,6 @@
 import type { Teleconsultation } from "../types/teleconsultation";
 
-export const teleconsultations: Teleconsultation[] = [
+export const initialTeleconsultations: Teleconsultation[] = [
   {
     id: "TC-001",
     patientName: "Maria José",
@@ -10,6 +10,7 @@ export const teleconsultations: Teleconsultation[] = [
     province: "Maputo",
     district: "KaMpfumo",
     symptoms: ["Febre", "Dor de cabeça"],
+    notes: "Paciente relata sintomas há 2 dias.",
     priority: "URGENTE",
     status: "AGENDADA",
     scheduledAt: "2026-03-07T09:30:00",
@@ -25,6 +26,7 @@ export const teleconsultations: Teleconsultation[] = [
     province: "Gaza",
     district: "Xai-Xai",
     symptoms: ["Dor no peito", "Falta de ar"],
+    notes: "Caso de elevada prioridade.",
     priority: "CRITICO",
     status: "EM_CURSO",
     scheduledAt: "2026-03-07T10:00:00",
@@ -40,6 +42,7 @@ export const teleconsultations: Teleconsultation[] = [
     province: "Sofala",
     district: "Beira",
     symptoms: ["Tosse"],
+    notes: "Tratamento sintomático recomendado.",
     priority: "NORMAL",
     status: "CONCLUIDA",
     scheduledAt: "2026-03-07T08:00:00",
@@ -55,10 +58,27 @@ export const teleconsultations: Teleconsultation[] = [
     province: "Nampula",
     district: "Nampula",
     symptoms: ["Tontura", "Fraqueza"],
+    notes: "Encaminhado para avaliação presencial.",
     priority: "URGENTE",
     status: "ENCAMINHADA",
     scheduledAt: "2026-03-07T11:00:00",
     createdAt: "2026-03-07T09:10:00",
     referredToPresential: true,
+  },
+  {
+    id: "TC-005",
+    patientName: "Sílvia Ernesto",
+    phone: "821234567",
+    age: 24,
+    sex: "F",
+    province: "Maputo",
+    district: "Matola",
+    symptoms: ["Dor abdominal"],
+    notes: "Aguardando consulta.",
+    priority: "NORMAL",
+    status: "AGENDADA",
+    scheduledAt: "2026-03-07T14:30:00",
+    createdAt: "2026-03-07T09:30:00",
+    referredToPresential: false,
   },
 ];
