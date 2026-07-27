@@ -1,90 +1,113 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Activity, CalendarCheck2, HeartPulse, ListFilter } from "lucide-react";
+import Link from "next/link";
+import {
+  Activity,
+  AlertTriangle,
+  CalendarCheck2,
+  Inbox,
+  ListFilter,
+  Plus,
+} from "lucide-react";
 
+import { StatCard } from "@/components/dashboard/stat-card";
 import { AppHeader } from "@/components/layout/app-header";
 import { PageShell } from "@/components/layout/page-shell";
-import { OverviewCard } from "@/components/telemedicine/overview-card";
-import { TeleconsultationsFilters } from "@/components/telemedicine/teleconsultations-filters";
-import { TeleconsultationsTable } from "@/components/telemedicine/teleconsultations-table";
-import { useTelemedicineStore } from "@/lib/store/telemedicine-store";
+import { useSession } from "@/components/layout/session-provider";
+import { ConsultationFiltersBar } from "@/components/telemedicine/consultation-filters";
+import { ConsultationsTable } from "@/components/telemedicine/consultations-table";
+import { Button } from "@/components/ui/button";
+import { useClinicStore } from "@/lib/store/clinic-store";
 import {
-  filterTeleconsultations,
-  getTeleconsultationOverview,
-  sortTeleconsultationsByDate,
-  type TeleconsultationFilters,
-} from "@/lib/utils/teleconsultations";
+  defaultFilters,
+  filterConsultations,
+  getMetrics,
+  sortByCreatedDesc,
+  sortByTriage,
+  type ConsultationFilters,
+} from "@/lib/utils/consultations";
 
 export default function TeleconsultasPage() {
-  const teleconsultations = useTelemedicineStore(
-    (state) => state.teleconsultations,
+  const user = useSession();
+  const allConsultations = useClinicStore((state) => state.consultations);
+  const [filters, setFilters] = useState<ConsultationFilters>(defaultFilters);
+
+  const isGuardian = user.role === "ENCARREGADO";
+
+  // Um encarregado só vê os pedidos da sua própria família.
+  const scoped = useMemo(
+    () =>
+      isGuardian
+        ? allConsultations.filter(
+            (item) => item.guardianId === user.id || item.phone === user.phone,
+          )
+        : allConsultations,
+    [allConsultations, isGuardian, user.id, user.phone],
   );
 
-  const [filters, setFilters] = useState<TeleconsultationFilters>({
-    search: "",
-    status: "TODOS",
-    priority: "TODOS",
-    referral: "TODOS",
-  });
+  const filtered = useMemo(() => {
+    const result = filterConsultations(scoped, filters);
+    // O pediatra precisa da fila por gravidade; a família prefere a ordem
+    // cronológica dos seus pedidos.
+    return isGuardian ? sortByCreatedDesc(result) : sortByTriage(result);
+  }, [scoped, filters, isGuardian]);
 
-  const filteredData = useMemo(() => {
-    const filtered = filterTeleconsultations(teleconsultations, filters);
-    return sortTeleconsultationsByDate(filtered);
-  }, [teleconsultations, filters]);
-
-  const overview = useMemo(
-    () => getTeleconsultationOverview(filteredData),
-    [filteredData],
-  );
+  const metrics = useMemo(() => getMetrics(filtered), [filtered]);
 
   return (
-    <div>
+    <>
       <AppHeader
-        title="Teleconsultas"
-        subtitle="Gestão completa de teleconsultas com pesquisa e filtros."
+        user={user}
+        title={isGuardian ? "Os meus pedidos" : "Teleconsultas"}
+        subtitle={
+          isGuardian
+            ? "Todos os pedidos submetidos pela sua família."
+            : "Fila de triagem ordenada por gravidade e hora de chegada."
+        }
+        actions={
+          isGuardian ? (
+            <Button asChild size="lg" className="hidden sm:inline-flex">
+              <Link href="/teleconsultas/novo">
+                <Plus data-icon="inline-start" />
+                Novo pedido
+              </Link>
+            </Button>
+          ) : null
+        }
       />
 
       <PageShell>
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <OverviewCard
-            title="Total filtrado"
-            value={overview.total}
-            icon={<ListFilter className="h-4 w-4 text-muted-foreground" />}
+          <StatCard
+            label="Total filtrado"
+            value={metrics.pending + metrics.scheduled + metrics.inProgress + metrics.completed + metrics.referred}
+            icon={ListFilter}
           />
-          <OverviewCard
-            title="Agendadas"
-            value={overview.scheduled}
-            icon={<CalendarCheck2 className="h-4 w-4 text-muted-foreground" />}
+          <StatCard
+            label="Pendentes"
+            value={metrics.pending}
+            icon={Inbox}
+            tone="warning"
           />
-          <OverviewCard
-            title="Em curso"
-            value={overview.inProgress}
-            icon={<Activity className="h-4 w-4 text-muted-foreground" />}
+          <StatCard
+            label="Agendadas"
+            value={metrics.scheduled}
+            icon={CalendarCheck2}
+            tone="primary"
           />
-          <OverviewCard
-            title="Casos críticos"
-            value={overview.critical}
-            icon={<HeartPulse className="h-4 w-4 text-muted-foreground" />}
+          <StatCard
+            label={isGuardian ? "Em curso" : "Casos críticos"}
+            value={isGuardian ? metrics.inProgress : metrics.critical}
+            icon={isGuardian ? Activity : AlertTriangle}
+            tone={isGuardian ? "success" : "danger"}
           />
         </section>
 
-        <section className="rounded-2xl border bg-card p-4 sm:p-6">
-          <div className="mb-4">
-            <h2 className="text-base font-semibold">Filtros</h2>
-            <p className="text-sm text-muted-foreground">
-              Pesquise e refine as teleconsultas por estado, prioridade e
-              encaminhamento.
-            </p>
-          </div>
+        <ConsultationFiltersBar filters={filters} onChange={setFilters} />
 
-          <TeleconsultationsFilters filters={filters} onChange={setFilters} />
-        </section>
-
-        <section>
-          <TeleconsultationsTable data={filteredData} />
-        </section>
+        <ConsultationsTable data={filtered} />
       </PageShell>
-    </div>
+    </>
   );
 }
