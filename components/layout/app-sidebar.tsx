@@ -2,90 +2,91 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  ClipboardList,
-  LayoutDashboard,
-  LogOut,
-  Smartphone,
-  Stethoscope,
-  UserRound,
-} from "lucide-react";
+import { LifeBuoy, Smartphone } from "lucide-react";
+
+import { Logo } from "@/components/brand/logo";
+import { navItemsForRole } from "@/components/layout/nav-items";
+import type { User } from "@/lib/types/user";
+import { roleLabels } from "@/lib/types/user";
 import { cn } from "@/lib/utils";
 
-const items = [
-  {
-    title: "Dashboard",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-  },
-  {
-    title: "Teleconsultas",
-    href: "/teleconsultas",
-    icon: Stethoscope,
-  },
-  {
-    title: "Histórico Clínico",
-    href: "/historico-clinico",
-    icon: ClipboardList,
-  },
-  {
-    title: "Perfil",
-    href: "/perfil",
-    icon: UserRound,
-  },
-];
-
-export function AppSidebar() {
+export function SidebarContent({
+  user,
+  onNavigate,
+}: {
+  user: User;
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
+  const items = navItemsForRole(user.role);
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-40 hidden h-screen w-72 border-r bg-background lg:flex lg:flex-col">
-      <div className="border-b px-6 py-5">
-        <div className="space-y-1">
-          <h2 className="text-xl font-bold tracking-tight">
-            Telemedicina Demo
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Painel de controlo médico
+    <div className="flex h-full flex-col bg-sidebar">
+      <div className="px-5 py-5">
+        <Logo href="/inicio" />
+      </div>
+
+      <div className="px-5 pb-4">
+        <p className="text-[0.625rem] font-bold tracking-[0.16em] text-muted-foreground uppercase">
+          {roleLabels[user.role]}
+        </p>
+      </div>
+
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3">
+        {items.map((item) => {
+          const active =
+            pathname === item.href || pathname.startsWith(`${item.href}/`);
+
+          return (
+            <Link
+              key={item.title}
+              href={item.href}
+              onClick={onNavigate}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
+                active
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                  : "text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+              )}
+            >
+              <item.icon className="size-4 shrink-0" />
+              <span className="truncate">{item.title}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="space-y-2 p-3">
+        <Link
+          href="/ussd"
+          onClick={onNavigate}
+          className="flex items-center gap-3 rounded-xl bg-card px-3 py-2.5 text-sm font-medium text-muted-foreground ring-1 ring-border transition-colors hover:text-foreground"
+        >
+          <Smartphone className="size-4 shrink-0" />
+          Simulador USSD
+        </Link>
+
+        <div className="rounded-xl bg-primary-soft p-3.5">
+          <p className="flex items-center gap-2 text-xs font-semibold text-secondary-foreground">
+            <LifeBuoy className="size-3.5 text-primary" />
+            Apoio HGM
+          </p>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+            Emergência pediátrica? Ligue{" "}
+            <span className="font-semibold text-foreground">1420</span> ou dirija-se
+            à unidade sanitária mais próxima.
           </p>
         </div>
       </div>
+    </div>
+  );
+}
 
-      <div className="flex min-h-0 flex-1 flex-col">
-        <nav className="flex-1 space-y-2 overflow-y-auto p-4">
-          {items.map((item) => {
-            const Icon = item.icon;
-            const active =
-              pathname === item.href || pathname.startsWith(`${item.href}/`);
-
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition-all",
-                  active
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-primary hover:text-primary-foreground",
-                )}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                <span className="truncate">{item.title}</span>
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className="border-t p-4">
-          <Link
-            href="/"
-            className="flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground"
-          >
-            <LogOut className="h-4 w-4 shrink-0" />
-            <span className="truncate">Sair</span>
-          </Link>
-        </div>
-      </div>
+export function AppSidebar({ user }: { user: User }) {
+  return (
+    <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-sidebar-border lg:block">
+      <SidebarContent user={user} />
     </aside>
   );
 }
