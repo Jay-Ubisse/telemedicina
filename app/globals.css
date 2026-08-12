@@ -93,11 +93,11 @@
   --chart-4: oklch(78% 0.16 75);
   --chart-5: oklch(60% 0.22 27);
   --radius: 0.875rem;
-  --ink: oklch(20% 0.028 220);
-  --ink-foreground: oklch(97% 0.006 220);
-  --ink-muted: oklch(72% 0.022 220);
+  --ink: oklch(22% 0.07 248);
+  --ink-foreground: oklch(97% 0.008 240);
+  --ink-muted: oklch(74% 0.04 240);
   --ink-line: oklch(100% 0 0 / 12%);
-  --paper: oklch(97.6% 0.009 95);
+  --paper: oklch(97% 0.014 235);
   --sidebar: oklch(98.5% 0.005 240);
   --sidebar-foreground: oklch(25% 0.04 245);
   --sidebar-primary: oklch(52% 0.16 245);
@@ -134,11 +134,11 @@
   --border: oklch(100% 0 0 / 12%);
   --input: oklch(100% 0 0 / 16%);
   --ring: oklch(64% 0.15 245);
-  --ink: oklch(15% 0.02 220);
-  --ink-foreground: oklch(96% 0.006 220);
-  --ink-muted: oklch(70% 0.02 220);
+  --ink: oklch(17% 0.055 248);
+  --ink-foreground: oklch(96% 0.008 240);
+  --ink-muted: oklch(72% 0.035 240);
   --ink-line: oklch(100% 0 0 / 10%);
-  --paper: oklch(21% 0.022 220);
+  --paper: oklch(22% 0.035 240);
   --sidebar: oklch(19% 0.022 245);
   --sidebar-foreground: oklch(94% 0.005 240);
   --sidebar-primary: oklch(64% 0.15 245);
@@ -163,17 +163,6 @@
 }
 
 @layer utilities {
-  /*
-   * Grelha de milímetros ténue — evoca papel pautado de registo clínico e dá
-   * estrutura às faixas escuras sem recorrer a gradientes decorativos.
-   */
-  .bg-hairline-grid {
-    background-image:
-      linear-gradient(to right, var(--ink-line) 1px, transparent 1px),
-      linear-gradient(to bottom, var(--ink-line) 1px, transparent 1px);
-    background-size: 3.5rem 3.5rem;
-  }
-
   /* Regras finas entre colunas, que desaparecem quando as colunas empilham. */
   .divide-hairline > * + * {
     border-color: var(--border);

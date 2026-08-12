@@ -199,6 +199,31 @@ export function getDailyVolume(data: Consultation[], days = 7) {
   return buckets;
 }
 
+const priorityOrder: ConsultationPriority[] = [
+  "CRITICA",
+  "URGENTE",
+  "AVALIACAO",
+  "NORMAL",
+];
+
+/** Distribuição de pedidos por prioridade (para o relatório). */
+export function getPriorityBreakdown(data: Consultation[]) {
+  return priorityOrder.map((priority) => ({
+    priority,
+    total: data.filter((item) => item.priority === priority).length,
+  }));
+}
+
+const channelOrder: ConsultationChannel[] = ["VIDEO", "VOZ"];
+
+/** Distribuição de pedidos por canal de atendimento (para o relatório). */
+export function getChannelBreakdown(data: Consultation[]) {
+  return channelOrder.map((channel) => ({
+    channel,
+    total: data.filter((item) => item.channel === channel).length,
+  }));
+}
+
 export function isOpen(consultation: Consultation) {
   return openStatuses.includes(consultation.status);
 }

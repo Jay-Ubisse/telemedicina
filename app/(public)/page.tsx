@@ -37,13 +37,23 @@ export default function LandingPage() {
  * institucional. O `*123#` é composto em mono dentro da display — o código é
  * literalmente parte da frase, porque é o produto.
  */
+const heroChecks = [
+  "Funciona sem internet",
+  "Triagem em até 30 minutos",
+  "Pediatras do HGM",
+  "Cidade de Maputo",
+];
+
 function Masthead() {
   return (
     <section className="border-b border-border bg-paper">
       <div className="mx-auto w-full max-w-[86rem] px-5 pt-16 pb-14 sm:px-8 lg:pt-24 lg:pb-20">
-        <p className="font-mono text-[0.6875rem] tracking-[0.2em] text-primary uppercase">
-          Teleconsulta pediátrica · 0 aos 15 anos
-        </p>
+        <div className="flex items-center gap-2.5">
+          <span aria-hidden className="h-px w-8 bg-primary" />
+          <p className="font-mono text-[0.6875rem] tracking-[0.2em] text-primary uppercase">
+            Teleconsulta pediátrica · 0 aos 15 anos
+          </p>
+        </div>
 
         <h1 className="mt-7 max-w-5xl font-heading text-[2.5rem] leading-[0.98] font-medium tracking-[-0.035em] text-balance sm:text-6xl lg:text-[5.25rem]">
           <span className="text-muted-foreground">
@@ -57,74 +67,67 @@ function Masthead() {
             .
           </span>
         </h1>
+
+        <p className="mt-7 max-w-md text-lg leading-relaxed text-muted-foreground">
+          Descreva os sintomas da sua criança pelo telemóvel. A equipa do HGM
+          avalia o pedido, marca a teleconsulta e devolve orientação clínica —
+          sem sair de casa.
+        </p>
+
+        <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+          <Button asChild size="xl" className="rounded-lg">
+            <Link href="/registo">
+              Solicitar consulta
+              <ArrowRight data-icon="inline-end" />
+            </Link>
+          </Button>
+          <Button asChild size="xl" variant="outline" className="rounded-lg">
+            <Link href="/login">Já tenho conta</Link>
+          </Button>
+        </div>
+
+        <ul className="mt-9 flex flex-wrap gap-x-7 gap-y-3">
+          {heroChecks.map((item) => (
+            <li
+              key={item}
+              className="flex items-center gap-2 text-sm text-muted-foreground"
+            >
+              <Check className="size-3.5 shrink-0 text-primary" />
+              {item}
+            </li>
+          ))}
+        </ul>
       </div>
     </section>
   );
 }
 
-const heroChecks = [
-  "Funciona sem internet",
-  "Triagem em até 30 minutos",
-  "Pediatras do HGM",
-  "Cidade de Maputo",
-];
-
-/**
- * O painel de instrumento: à esquerda a promessa, à direita o mecanismo real —
- * a sessão USSD e o registo clínico que dela resulta.
- */
+/** O mecanismo real do serviço: a sessão USSD e o registo clínico que dela resulta. */
 function Instrument() {
   return (
     <section id="servico" className="scroll-mt-24 border-b border-border">
       <div className="mx-auto w-full max-w-[86rem] px-5 py-14 sm:px-8 lg:py-20">
-        <div className="grid gap-12 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-16">
-          <div className="lg:pt-4">
-            <p className="max-w-md text-lg leading-relaxed text-muted-foreground">
-              Descreva os sintomas da sua criança pelo telemóvel. A equipa do
-              HGM avalia o pedido, marca a teleconsulta e devolve orientação
-              clínica — sem sair de casa.
+        <p className="font-mono text-[0.6875rem] tracking-[0.2em] text-primary uppercase">
+          Como funciona
+        </p>
+        <h2 className="mt-5 max-w-2xl font-heading text-3xl font-extrabold tracking-[-0.03em] text-balance sm:text-4xl">
+          Um pedido feito num telemóvel sem internet, já triado do outro lado.
+        </h2>
+
+        {/* Moldura de simulação: terminal + registo resultante */}
+        <div className="mt-10 overflow-hidden rounded-xl border border-border bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/50 px-4 py-2.5">
+            <p className="font-mono text-[0.625rem] tracking-[0.16em] text-muted-foreground uppercase">
+              Simulação · pedido real em 4 passos
             </p>
-
-            <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-              <Button asChild size="xl" className="rounded-lg">
-                <Link href="/registo">
-                  Solicitar consulta
-                  <ArrowRight data-icon="inline-end" />
-                </Link>
-              </Button>
-              <Button asChild size="xl" variant="outline" className="rounded-lg">
-                <Link href="/login">Já tenho conta</Link>
-              </Button>
-            </div>
-
-            <ul className="mt-10 border-t border-border">
-              {heroChecks.map((item) => (
-                <li
-                  key={item}
-                  className="flex items-center gap-3 border-b border-border py-3 text-sm"
-                >
-                  <Check className="size-3.5 shrink-0 text-primary" />
-                  {item}
-                </li>
-              ))}
-            </ul>
+            <p className="font-mono text-[0.625rem] tracking-[0.16em] text-muted-foreground uppercase">
+              Dados fictícios
+            </p>
           </div>
 
-          {/* Moldura de simulação: terminal + registo resultante */}
-          <div className="overflow-hidden rounded-xl border border-border bg-card">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/50 px-4 py-2.5">
-              <p className="font-mono text-[0.625rem] tracking-[0.16em] text-muted-foreground uppercase">
-                Simulação · pedido real em 4 passos
-              </p>
-              <p className="font-mono text-[0.625rem] tracking-[0.16em] text-muted-foreground uppercase">
-                Dados fictícios
-              </p>
-            </div>
-
-            <div className="grid md:grid-cols-2">
-              <UssdTerminal className="border-b border-border md:border-r md:border-b-0" />
-              <ResultingRecord />
-            </div>
+          <div className="grid md:grid-cols-2">
+            <UssdTerminal className="border-b border-border md:border-r md:border-b-0" />
+            <ResultingRecord />
           </div>
         </div>
       </div>
@@ -203,7 +206,7 @@ function Evidence() {
               index > 0 ? "lg:border-l lg:border-border lg:pl-8" : "",
             ].join(" ")}
           >
-            <p className="font-heading text-3xl font-extrabold tracking-[-0.03em] tabular-nums lg:text-[2.75rem]">
+            <p className="font-heading text-3xl font-extrabold tracking-[-0.03em] text-primary tabular-nums lg:text-[2.75rem]">
               {item.value}
             </p>
             <p className="mt-2 font-mono text-[0.625rem] tracking-[0.14em] text-muted-foreground uppercase">
@@ -410,7 +413,7 @@ function Professionals() {
   return (
     <section
       id="profissionais"
-      className="scroll-mt-24 bg-ink bg-hairline-grid text-ink-foreground"
+      className="scroll-mt-24 bg-ink text-ink-foreground"
     >
       <div className="mx-auto w-full max-w-[86rem] px-5 py-16 sm:px-8 lg:py-24">
         <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:gap-16">
@@ -469,7 +472,7 @@ function QueuePreview() {
   ];
 
   return (
-    <div className="overflow-hidden rounded-xl border border-ink-line bg-ink/60 backdrop-blur">
+    <div className="overflow-hidden rounded-xl border border-ink-line bg-white/[0.04]">
       <div className="flex items-center justify-between gap-3 border-b border-ink-line px-5 py-3">
         <p className="font-mono text-[0.625rem] tracking-[0.16em] text-ink-muted uppercase">
           Fila de triagem · hoje
