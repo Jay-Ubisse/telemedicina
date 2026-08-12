@@ -438,6 +438,7 @@ export function ConsultationDetail({ id }: { id: string }) {
                                   : "")
                               }
                               onChange={(event) => setScheduledAt(event.target.value)}
+                              min="2026-01-01T00:00"
                               className="mt-2 h-11 rounded-xl px-3.5"
                               required
                             />

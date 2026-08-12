@@ -5,6 +5,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Download,
+  Info,
   Pencil,
   Plus,
   Search,
@@ -16,12 +17,13 @@ import {
   Activity,
 } from "lucide-react";
 
+import { BreakdownBars } from "@/components/dashboard/breakdown-bars";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { AppHeader } from "@/components/layout/app-header";
 import { EmptyState, PageShell } from "@/components/layout/page-shell";
 import { initialsOf } from "@/components/layout/nav-items";
 import { useSession } from "@/components/layout/session-provider";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,8 +51,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useClinicStore } from "@/lib/store/clinic-store";
+import type { ConsultationChannel, ConsultationPriority } from "@/lib/types/consultation";
 import {
   channelLabels,
   priorityLabels,
@@ -58,7 +67,12 @@ import {
 } from "@/lib/types/consultation";
 import type { User, UserRole } from "@/lib/types/user";
 import { roleLabels, shortRoleLabels } from "@/lib/types/user";
-import { getDailyVolume, getMetrics } from "@/lib/utils/consultations";
+import {
+  getChannelBreakdown,
+  getDailyVolume,
+  getMetrics,
+  getPriorityBreakdown,
+} from "@/lib/utils/consultations";
 import { downloadCsv, toCsv } from "@/lib/utils/csv";
 import { formatDate, formatDateTime } from "@/lib/utils/date";
 import { cn } from "@/lib/utils";
@@ -72,6 +86,18 @@ type UserForm = {
   specialty: string;
   licenseNumber: string;
   address: string;
+};
+
+const priorityBarColors: Record<ConsultationPriority, string> = {
+  CRITICA: "bg-destructive",
+  URGENTE: "bg-warning",
+  AVALIACAO: "bg-primary",
+  NORMAL: "bg-success",
+};
+
+const channelBarColors: Record<ConsultationChannel, string> = {
+  VIDEO: "bg-primary",
+  VOZ: "bg-accent",
 };
 
 const emptyUserForm: UserForm = {
@@ -103,9 +129,32 @@ export default function AdministracaoPage() {
   const [feedback, setFeedback] = useState<string | null>(null);
 
   const metrics = useMemo(() => getMetrics(consultations), [consultations]);
-  // O gráfico é derivado dos pedidos reais, por isso actualiza-se sozinho.
+  // Os gráficos são derivados dos pedidos reais, por isso actualizam-se sozinhos
+  // sempre que a lista de consultas muda.
   const volume = useMemo(() => getDailyVolume(consultations, 7), [consultations]);
   const maxVolume = Math.max(...volume.map((entry) => entry.total), 1);
+
+  const priorityBreakdown = useMemo(
+    () =>
+      getPriorityBreakdown(consultations).map((entry) => ({
+        key: entry.priority,
+        label: priorityLabels[entry.priority],
+        total: entry.total,
+        colorClassName: priorityBarColors[entry.priority],
+      })),
+    [consultations],
+  );
+
+  const channelBreakdown = useMemo(
+    () =>
+      getChannelBreakdown(consultations).map((entry) => ({
+        key: entry.channel,
+        label: channelLabels[entry.channel],
+        total: entry.total,
+        colorClassName: channelBarColors[entry.channel],
+      })),
+    [consultations],
+  );
 
   const filteredUsers = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -321,6 +370,7 @@ export default function AdministracaoPage() {
             ) : (
               <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/8">
                 <div className="overflow-x-auto">
+                  <TooltipProvider>
                   <Table className="min-w-[860px]">
                     <TableHeader>
                       <TableRow>
@@ -391,38 +441,52 @@ export default function AdministracaoPage() {
 
                           <TableCell>
                             <div className="flex justify-end gap-1.5">
-                              <Button
-                                variant="outline"
-                                size="icon-sm"
-                                aria-label={`Editar ${item.name}`}
-                                onClick={() => openEdit(item)}
-                              >
-                                <Pencil />
-                              </Button>
-                              <Button
-                                variant={item.active ? "destructive" : "outline"}
-                                size="icon-sm"
-                                aria-label={
-                                  item.active
-                                    ? `Desactivar ${item.name}`
-                                    : `Activar ${item.name}`
-                                }
-                                disabled={item.id === user.id}
-                                onClick={() => {
-                                  setUserActive(item.id, !item.active);
-                                  setFeedback(
-                                    `${item.name} ${item.active ? "desactivado" : "activado"}.`,
-                                  );
-                                }}
-                              >
-                                {item.active ? <ShieldOff /> : <ShieldCheck />}
-                              </Button>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="icon-sm"
+                                    aria-label={`Editar ${item.name}`}
+                                    onClick={() => openEdit(item)}
+                                  >
+                                    <Pencil />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Editar utilizador</TooltipContent>
+                              </Tooltip>
+
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant={item.active ? "destructive" : "outline"}
+                                    size="icon-sm"
+                                    aria-label={
+                                      item.active
+                                        ? `Desactivar ${item.name}`
+                                        : `Activar ${item.name}`
+                                    }
+                                    disabled={item.id === user.id}
+                                    onClick={() => {
+                                      setUserActive(item.id, !item.active);
+                                      setFeedback(
+                                        `${item.name} ${item.active ? "desactivado" : "activado"}.`,
+                                      );
+                                    }}
+                                  >
+                                    {item.active ? <ShieldOff /> : <ShieldCheck />}
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {item.active ? "Desactivar utilizador" : "Activar utilizador"}
+                                </TooltipContent>
+                              </Tooltip>
                             </div>
                           </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
+                  </TooltipProvider>
                 </div>
               </div>
             )}
@@ -430,6 +494,16 @@ export default function AdministracaoPage() {
 
           {/* --- Relatórios --- */}
           <TabsContent value="relatorios" className="mt-5 space-y-6">
+            <Alert variant="info">
+              <Info />
+              <AlertTitle>Gráficos de demonstração</AlertTitle>
+              <AlertDescription>
+                Construídos a partir dos pedidos actualmente registados nesta
+                pré-visualização. Em produção, actualizam-se automaticamente
+                sempre que um novo pedido é submetido.
+              </AlertDescription>
+            </Alert>
+
             <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -500,6 +574,28 @@ export default function AdministracaoPage() {
               <StatCard label="Agendadas" value={metrics.scheduled} icon={Activity} tone="primary" />
               <StatCard label="Concluídas" value={metrics.completed} icon={CheckCircle2} tone="success" />
               <StatCard label="Encaminhadas" value={metrics.referred} icon={ShieldOff} tone="danger" />
+            </section>
+
+            <section className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+                <h2 className="font-bold tracking-tight">Pedidos por prioridade</h2>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Classificação atribuída pela triagem automática.
+                </p>
+                <div className="mt-6">
+                  <BreakdownBars items={priorityBreakdown} />
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+                <h2 className="font-bold tracking-tight">Pedidos por canal</h2>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Videochamada vs. chamada de voz.
+                </p>
+                <div className="mt-6">
+                  <BreakdownBars items={channelBreakdown} />
+                </div>
+              </div>
             </section>
           </TabsContent>
         </Tabs>

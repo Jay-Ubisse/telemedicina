@@ -433,6 +433,9 @@ export const useClinicStore = create<ClinicState>()(
         const consultation = state.consultations.find((item) => item.id === id);
         if (!consultation) return fail("Pedido não encontrado.");
         if (!input.scheduledAt) return fail("Escolha a data e a hora da teleconsulta.");
+        if (new Date(input.scheduledAt).getFullYear() < 2026) {
+          return fail("A teleconsulta só pode ser agendada a partir de 2026.");
+        }
 
         const doctor = state.users.find((item) => item.id === input.doctorId);
         if (!doctor) return fail("Seleccione o pediatra responsável.");
