@@ -105,7 +105,7 @@ export function TodayAgenda({ data }: { data: Consultation[] }) {
             <TableBody>
               {rows.map((item) => (
                 <TableRow key={item.id}>
-                  <TableCell className="font-mono text-sm font-semibold tabular-nums">
+                  <TableCell className="text-sm font-semibold tabular-nums">
                     {formatTime(item.scheduledAt!)}
                   </TableCell>
                   <TableCell className="font-medium">{item.childName}</TableCell>

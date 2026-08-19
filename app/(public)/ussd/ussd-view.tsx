@@ -23,20 +23,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { maputoNeighbourhoods } from "@/lib/data/locations";
 import { MAX_AGE_YEARS, ussdSymptomMenu } from "@/lib/data/symptoms";
 import { useClinicStore } from "@/lib/store/clinic-store";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import {
   channelLabels,
+  closedStatuses,
   priorityLabels,
   statusLabels,
 } from "@/lib/types/consultation";
 import type { ConsultationChannel } from "@/lib/types/consultation";
+import { isMeetingLinkValid } from "@/lib/utils/consultations";
 import { formatDateTime, formatTime } from "@/lib/utils/date";
 import { validateChildAge } from "@/lib/utils/triage";
 
 type Step =
   | "MENU"
+  | "ENCARREGADO"
   | "NOME"
   | "IDADE"
   | "LOCALIZACAO"
@@ -50,6 +54,7 @@ type Step =
   | "FIM";
 
 type Draft = {
+  guardianName: string;
   childName: string;
   age: string;
   location: string;
@@ -60,6 +65,7 @@ type Draft = {
 };
 
 const emptyDraft: Draft = {
+  guardianName: "",
   childName: "",
   age: "",
   location: "",
@@ -74,13 +80,43 @@ const OTHER_KEY = String(ussdSymptomMenu.length);
 /** Convenção USSD para paginação; não colide com nenhum número de sintoma. */
 const NEXT_PAGE_KEY = "99";
 
-/** Números "de SIM" disponíveis no simulador. */
+/** Números "de SIM" pré-configurados no simulador. */
 const simCards = [
   { phone: "+258 84 512 3390", label: "Ana Mondlane" },
   { phone: "+258 82 771 4408", label: "Carla Nhaca" },
   { phone: "+258 86 330 9812", label: "Paulo Cossa" },
   { phone: "+258 84 777 1200", label: "Número não registado" },
 ];
+
+const OTHER_SIM = "OUTRO";
+
+/**
+ * Menu de localização.
+ *
+ * O passo anterior era um campo de texto livre, onde entravam ruas e números
+ * de porta. Um pedido de teleconsulta não precisa da morada exacta da criança:
+ * o bairro chega para organizar o atendimento e é o que a política de
+ * privacidade permite mostrar.
+ */
+const locationMenu = maputoNeighbourhoods.map((label, index) => ({
+  key: String(index + 1),
+  label,
+}));
+
+const LOCATIONS_PER_PAGE = 6;
+
+/** Últimos 9 dígitos — compara números escritos em formatos diferentes. */
+function phoneKey(value: string) {
+  return value.replace(/\D/g, "").slice(-9);
+}
+
+/** Normaliza um número escrito à mão no simulador. */
+function normalizePhone(value: string) {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length < 9) return "";
+  const local = digits.slice(-9);
+  return `+258 ${local.slice(0, 2)} ${local.slice(2, 5)} ${local.slice(5)}`;
+}
 
 export function UssdView() {
   const hydrated = useHydrated();
@@ -90,7 +126,8 @@ export function UssdView() {
   const consultations = useClinicStore((state) => state.consultations);
   const createConsultation = useClinicStore((state) => state.createConsultation);
 
-  const [sim, setSim] = useState(simCards[0].phone);
+  const [sim, setSim] = useState<string>(simCards[0].phone);
+  const [customPhone, setCustomPhone] = useState("");
   const [step, setStep] = useState<Step>("MENU");
   // A pilha só é lida dentro dos updaters funcionais de `setHistory`.
   const [, setHistory] = useState<Step[]>([]);
@@ -98,6 +135,7 @@ export function UssdView() {
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [symptomPage, setSymptomPage] = useState(0);
+  const [locationPage, setLocationPage] = useState(0);
   const [result, setResult] = useState<{
     message: string;
     reference: string;
@@ -108,19 +146,32 @@ export function UssdView() {
 
   /**
    * O número é capturado automaticamente pela rede — o utilizador nunca o
-   * digita no menu USSD.
+   * digita no menu USSD. No simulador é possível escolher um dos cartões
+   * pré-configurados ou introduzir qualquer outro número.
    */
-  const capturedPhone = sim;
+  const capturedPhone =
+    sim === OTHER_SIM ? normalizePhone(customPhone) : sim;
 
   const guardian = useMemo(
-    () => users.find((user) => user.phone === capturedPhone) ?? null,
+    () =>
+      capturedPhone
+        ? (users.find(
+            (user) =>
+              user.role === "ENCARREGADO" &&
+              phoneKey(user.phone) === phoneKey(capturedPhone),
+          ) ?? null)
+        : null,
     [users, capturedPhone],
   );
 
   const myRequests = useMemo(
     () =>
       consultations
-        .filter((item) => item.phone === capturedPhone)
+        .filter(
+          (item) =>
+            capturedPhone !== "" &&
+            phoneKey(item.phone) === phoneKey(capturedPhone),
+        )
         .sort(
           (a, b) =>
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -156,6 +207,7 @@ export function UssdView() {
     setError(null);
     setResult(null);
     setSymptomPage(0);
+    setLocationPage(0);
     setHistory([]);
     setStep("MENU");
   }
@@ -164,6 +216,12 @@ export function UssdView() {
   const visibleSymptoms = ussdSymptomMenu.slice(
     symptomPage * SYMPTOMS_PER_PAGE,
     symptomPage * SYMPTOMS_PER_PAGE + SYMPTOMS_PER_PAGE,
+  );
+
+  const locationPages = Math.ceil(locationMenu.length / LOCATIONS_PER_PAGE);
+  const visibleLocations = locationMenu.slice(
+    locationPage * LOCATIONS_PER_PAGE,
+    locationPage * LOCATIONS_PER_PAGE + LOCATIONS_PER_PAGE,
   );
 
   function submit() {
@@ -176,10 +234,23 @@ export function UssdView() {
     }
 
     if (step === "MENU") {
-      if (value === "1") return goTo("NOME");
+      if (!capturedPhone) {
+        return setError("Introduza um número de telemóvel válido (9 dígitos).");
+      }
+      // Número novo: recolhe-se primeiro quem é o encarregado, para que a
+      // criança fique desde logo associada a uma pessoa e não a um número.
+      if (value === "1") return goTo(guardian ? "NOME" : "ENCARREGADO");
       if (value === "2") return goTo("PEDIDOS");
       if (value === "3" || value === "0") return setStep("FIM");
       return setError("Opção inválida.");
+    }
+
+    if (step === "ENCARREGADO") {
+      if (value.length < 3) {
+        return setError("Digite o nome do encarregado de educação.");
+      }
+      setDraft((current) => ({ ...current, guardianName: value }));
+      return goTo("NOME");
     }
 
     if (step === "NOME") {
@@ -196,10 +267,19 @@ export function UssdView() {
     }
 
     if (step === "LOCALIZACAO") {
-      if (value.length < 3) {
-        return setError("Digite o bairro e a avenida / rua.");
+      if (value === NEXT_PAGE_KEY && locationPages > 1) {
+        setLocationPage((page) => (page + 1) % locationPages);
+        setInput("");
+        setError(null);
+        return;
       }
-      setDraft((current) => ({ ...current, location: value }));
+
+      const bairro = locationMenu.find((item) => item.key === value);
+      if (!bairro) {
+        return setError("Digite o número do bairro ou 99 para mais opções.");
+      }
+
+      setDraft((current) => ({ ...current, location: bairro.label }));
       return goTo("SINTOMA");
     }
 
@@ -256,7 +336,7 @@ export function UssdView() {
       if (value === "2") {
         // Corrigir: recomeça a recolha mantendo o que já foi digitado.
         setHistory([]);
-        setStep("NOME");
+        setStep(guardian ? "NOME" : "ENCARREGADO");
         setInput("");
         setError(null);
         return;
@@ -277,7 +357,7 @@ export function UssdView() {
         guardianId: guardian?.id ?? null,
         fallbackChildName: draft.childName,
         fallbackChildAge: Number(draft.age),
-        fallbackGuardianName: guardian?.name,
+        fallbackGuardianName: guardian?.name ?? draft.guardianName,
         phone: capturedPhone,
         location: draft.location,
         symptoms: draft.symptoms,
@@ -304,11 +384,12 @@ export function UssdView() {
 
     if (step === "RESULTADO") {
       if (value === "1") {
-        setDraft(emptyDraft);
+        setDraft((current) => ({ ...emptyDraft, guardianName: current.guardianName }));
         setResult(null);
         setSymptomPage(0);
+        setLocationPage(0);
         setHistory([]);
-        setStep("NOME");
+        setStep(guardian ? "NOME" : "ENCARREGADO");
         setInput("");
         return;
       }
@@ -352,7 +433,7 @@ export function UssdView() {
             </span>
 
             <h1 className="mt-5 text-3xl font-extrabold tracking-tight sm:text-4xl">
-              Simulador USSD · *123#
+              Simulador USSD · <span className="font-ussd">*123#</span>
             </h1>
             <p className="mt-3 max-w-2xl leading-relaxed text-muted-foreground">
               Reproduz o atendimento em telemóveis sem internet. Cada ecrã
@@ -386,8 +467,36 @@ export function UssdView() {
                     {card.phone} · {card.label}
                   </SelectItem>
                 ))}
+                <SelectItem value={OTHER_SIM}>Outro número…</SelectItem>
               </SelectContent>
             </Select>
+
+            {sim === OTHER_SIM ? (
+              <div className="mt-3">
+                <Label htmlFor="sim-custom" className="text-sm font-semibold">
+                  Número do cartão
+                </Label>
+                <Input
+                  id="sim-custom"
+                  type="tel"
+                  inputMode="tel"
+                  value={customPhone}
+                  onChange={(event) => {
+                    setCustomPhone(event.target.value);
+                    reset();
+                  }}
+                  placeholder="+258 84 000 0000"
+                  className="mt-2 h-11 rounded-xl px-3.5"
+                />
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  {capturedPhone
+                    ? guardian
+                      ? `Número registado em nome de ${guardian.name}.`
+                      : "Número novo: o menu vai perguntar quem é o encarregado de educação e criar a ficha da família."
+                    : "Introduza 9 dígitos (ex.: 84 000 0000)."}
+                </p>
+              </div>
+            ) : null}
           </div>
 
           <div className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
@@ -397,7 +506,8 @@ export function UssdView() {
                 `Serviço exclusivo para crianças dos 0 aos ${MAX_AGE_YEARS} anos.`,
                 "Digite 0 em qualquer ecrã para voltar ao passo anterior.",
                 "Sintomas críticos geram encaminhamento imediato para a unidade sanitária.",
-                "Recolhe-se apenas a localização (bairro / avenida), sem província nem distrito.",
+                "A localização é escolhida numa lista de bairros de Maputo — não se recolhe rua nem número de porta.",
+                "Um número ainda não registado cria a ficha do encarregado e liga-lhe a criança do pedido.",
                 "Videochamada: o link é enviado por SMS depois do agendamento e expira 10 minutos após a hora marcada.",
                 "O mesmo encarregado pode registar pedidos para crianças diferentes no mesmo dia.",
               ].map((rule) => (
@@ -453,7 +563,9 @@ export function UssdView() {
               phone={capturedPhone}
               guardianName={guardian?.name ?? null}
               visibleSymptoms={visibleSymptoms}
+              visibleLocations={visibleLocations}
               hasMorePages={symptomPages > 1}
+              hasMoreLocationPages={locationPages > 1}
               result={result}
               requests={hydrated ? myRequests : []}
             />
@@ -470,7 +582,9 @@ type ScreenProps = {
   phone: string;
   guardianName: string | null;
   visibleSymptoms: { key: string; label: string }[];
+  visibleLocations: { key: string; label: string }[];
   hasMorePages: boolean;
+  hasMoreLocationPages: boolean;
   result: {
     message: string;
     reference: string;
@@ -487,7 +601,9 @@ function UssdScreen({
   phone,
   guardianName,
   visibleSymptoms,
+  visibleLocations,
   hasMorePages,
+  hasMoreLocationPages,
   result,
   requests,
 }: ScreenProps) {
@@ -495,7 +611,8 @@ function UssdScreen({
     return (
       <UssdDialog code="*123#">
         {`HGM TelePediatria
-Número: ${phone}${guardianName ? `\n${guardianName}` : ""}
+Número: ${phone || "não detectado"}
+${guardianName ?? "Número ainda não registado"}
 
 1. Solicitar teleconsulta
 2. Ver os meus pedidos
@@ -504,10 +621,22 @@ Número: ${phone}${guardianName ? `\n${guardianName}` : ""}
     );
   }
 
+  if (step === "ENCARREGADO") {
+    return (
+      <UssdDialog code="*123# · Encarregado">
+        {`Este número ainda não está registado.
+
+Nome do encarregado de educação:
+
+0. Voltar`}
+      </UssdDialog>
+    );
+  }
+
   if (step === "NOME") {
     return (
       <UssdDialog code="*123# · 1/6">
-        {`Nome completo da criança:
+        {`${draft.guardianName ? `Encarregado: ${draft.guardianName}\n\n` : ""}Nome completo da criança:
 
 0. Voltar`}
       </UssdDialog>
@@ -527,12 +656,15 @@ Idade da criança (0-${MAX_AGE_YEARS} anos):
   }
 
   if (step === "LOCALIZACAO") {
+    const options = visibleLocations
+      .map((item) => `${item.key}. ${item.label}`)
+      .join("\n");
+
     return (
       <UssdDialog code="*123# · 3/6">
-        {`Localização (bairro e avenida/rua):
-Ex.: Mavalane A, Av. de Moçambique
-
-0. Voltar`}
+        {`Bairro (cidade de Maputo):
+${options}
+${hasMoreLocationPages ? "99. Mais opções\n" : ""}0. Voltar`}
       </UssdDialog>
     );
   }
@@ -589,10 +721,14 @@ Escreva ou digite 9 para saltar.
 
     return (
       <UssdDialog code="*123# · Confirmar">
-        {`Confirme o pedido:
+        {`Confirme o pedido:${
+          guardianName || draft.guardianName
+            ? `\nEncarregado: ${guardianName ?? draft.guardianName}`
+            : ""
+        }
 Criança: ${draft.childName}
 Idade: ${draft.age} anos
-Local: ${draft.location}
+Bairro: ${draft.location}
 Sintoma: ${symptom}
 Canal: ${draft.channel ? channelLabels[draft.channel] : "—"}
 Obs.: ${draft.notes || "sem observações"}
@@ -644,10 +780,15 @@ Prioridade: ${result.priority}${
         const when = item.scheduledAt
           ? `\n   Marcada: ${formatDateTime(item.scheduledAt)}`
           : "";
-        const link =
-          item.meetingLink && item.meetingLinkExpiresAt
-            ? `\n   Link válido até ${formatTime(item.meetingLinkExpiresAt)}`
-            : "";
+        // Um pedido concluído ou encaminhado não tem link activo, seja qual
+        // for o prazo definido no agendamento.
+        const link = !item.meetingLink
+          ? ""
+          : closedStatuses.includes(item.status)
+            ? "\n   Link encerrado"
+            : isMeetingLinkValid(item)
+              ? `\n   Link válido até ${formatTime(item.meetingLinkExpiresAt!)}`
+              : "\n   Link expirado — peça o reenvio ao HGM";
 
         return `${item.reference} · ${item.childName}\n   ${
           statusLabels[item.status]

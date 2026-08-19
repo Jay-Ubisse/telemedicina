@@ -1,6 +1,7 @@
 /**
- * A plataforma opera na cidade de Maputo, por isso o pedido recolhe apenas
- * "Localização" (bairro / avenida) em vez de província + distrito.
+ * A plataforma opera na cidade de Maputo, por isso o pedido recolhe apenas o
+ * bairro — nunca rua nem número de porta. É a lista fechada usada no menu
+ * USSD, no formulário web e no registo da família.
  */
 export const maputoNeighbourhoods = [
   "Mavalane A",
@@ -23,7 +24,8 @@ export const maputoNeighbourhoods = [
 
 export const CITY = "Maputo";
 
-/** Ex.: "Mavalane A, Av. de Moçambique" → mostrado tal e qual no dashboard. */
+/** Ex.: "Mavalane A" → "Mavalane A, Maputo". */
 export function formatLocation(location: string) {
-  return location.trim() || "Localização não indicada";
+  const bairro = location.trim();
+  return bairro ? `${bairro}, ${CITY}` : "Localização não indicada";
 }

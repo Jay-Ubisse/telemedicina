@@ -20,6 +20,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { maputoNeighbourhoods } from "@/lib/data/locations";
 import { MAX_AGE_YEARS } from "@/lib/data/symptoms";
 import { useClinicStore } from "@/lib/store/clinic-store";
 import { ageInYears } from "@/lib/utils/date";
@@ -118,14 +126,14 @@ export function RegisterView() {
     }
 
     if (index === 1) {
-      if (form.phone.trim().length < 9) {
+      if (form.phone.replace(/\D/g, "").length < 9) {
         return "Indique um número de telefone válido (9 dígitos).";
       }
       if (form.idDocument.trim().length < 5) {
         return "Indique o número do documento de identificação.";
       }
-      if (form.address.trim().length < 4) {
-        return "Indique o bairro e a avenida / rua.";
+      if (!form.address.trim()) {
+        return "Seleccione o bairro de residência.";
       }
       return null;
     }
@@ -160,6 +168,13 @@ export function RegisterView() {
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+
+    // Cada passo é submetido: assim o browser aplica as restrições nativas
+    // (obrigatoriedade, tipo, comprimento mínimo) antes da validação própria.
+    if (!isLastStep) {
+      goNext();
+      return;
+    }
 
     const problem = validateStep(2);
     if (problem) {
@@ -204,7 +219,7 @@ export function RegisterView() {
           {benefits.map((benefit) => (
             <li
               key={benefit.title}
-              className="flex items-center gap-2 font-mono text-[0.625rem] tracking-[0.12em] text-ink-muted uppercase"
+              className="flex items-center gap-2 text-[0.625rem] tracking-[0.12em] text-ink-muted font-semibold uppercase"
             >
               <benefit.icon className="size-3 text-primary" />
               {benefit.title}
@@ -234,7 +249,7 @@ export function RegisterView() {
                   {done ? <Check className="size-3 text-primary" /> : null}
                   <span
                     className={cn(
-                      "font-mono text-[0.5625rem] tracking-[0.14em] uppercase",
+                      "text-[0.5625rem] tracking-[0.14em] font-semibold uppercase",
                       active
                         ? "text-primary"
                         : done
@@ -257,7 +272,7 @@ export function RegisterView() {
           {stepsMeta[step].description}
         </p>
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-5" noValidate>
+        <form onSubmit={handleSubmit} className="mt-6 space-y-5">
           {error ? (
             <Alert variant="destructive">
               <AlertCircle />
@@ -271,6 +286,7 @@ export function RegisterView() {
                 id="register-full-name"
                 label="Nome completo"
                 autoComplete="name"
+                minLength={3}
                 value={form.fullName}
                 onChange={(value) => update("fullName", value)}
                 placeholder="Ana Mondlane"
@@ -289,18 +305,26 @@ export function RegisterView() {
                 label="Criar palavra-passe"
                 type="password"
                 autoComplete="new-password"
+                minLength={6}
                 value={form.password}
                 onChange={(value) => update("password", value)}
                 placeholder="Mínimo 6 caracteres"
+                hint="Pelo menos 6 caracteres."
+                invalid={form.password.length > 0 && form.password.length < 6}
               />
               <Field
                 id="register-password-confirm"
                 label="Confirmar palavra-passe"
                 type="password"
                 autoComplete="new-password"
+                minLength={6}
                 value={form.passwordConfirm}
                 onChange={(value) => update("passwordConfirm", value)}
                 placeholder="Repita a palavra-passe"
+                invalid={
+                  form.passwordConfirm.length > 0 &&
+                  form.password !== form.passwordConfirm
+                }
               />
             </>
           ) : null}
@@ -325,15 +349,41 @@ export function RegisterView() {
                 onChange={(value) => update("idDocument", value)}
                 placeholder="BI / DIRE / Passaporte"
               />
-              <Field
-                id="register-address"
-                label="Bairro / endereço"
-                autoComplete="street-address"
-                value={form.address}
-                onChange={(value) => update("address", value)}
-                placeholder="Mavalane A, Av. de Moçambique nº 421"
-                hint="O serviço opera na cidade de Maputo."
-              />
+              {/*
+                Bairro em lista fechada: não se recolhe rua nem número de
+                porta — só o necessário para organizar o atendimento.
+              */}
+              <div className="space-y-2">
+                <Label htmlFor="register-address" className="text-sm font-semibold">
+                  Bairro
+                  <span aria-hidden className="ml-0.5 text-destructive">
+                    *
+                  </span>
+                </Label>
+                <Select
+                  value={form.address}
+                  onValueChange={(value) => update("address", value)}
+                >
+                  <SelectTrigger
+                    id="register-address"
+                    aria-required="true"
+                    className="h-11 w-full rounded-xl"
+                  >
+                    <SelectValue placeholder="Seleccione o bairro" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {maputoNeighbourhoods.map((bairro) => (
+                      <SelectItem key={bairro} value={bairro}>
+                        {bairro}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  O serviço opera na cidade de Maputo. Não é recolhida a rua nem
+                  o número de residência.
+                </p>
+              </div>
             </>
           ) : null}
 
@@ -343,6 +393,7 @@ export function RegisterView() {
                 id="register-child-name"
                 label="Nome da criança"
                 autoComplete="off"
+                minLength={3}
                 value={form.childName}
                 onChange={(value) => update("childName", value)}
                 placeholder="Tiago Mondlane"
@@ -354,13 +405,19 @@ export function RegisterView() {
                   label="Data de nascimento"
                   type="date"
                   autoComplete="off"
+                  max={new Date().toISOString().slice(0, 10)}
                   value={form.childBirthDate}
                   onChange={(value) => update("childBirthDate", value)}
                   hint={`Serviço exclusivo dos 0 aos ${MAX_AGE_YEARS} anos.`}
                 />
 
                 <div className="space-y-2">
-                  <Label className="text-sm font-semibold">Sexo</Label>
+                  <Label className="text-sm font-semibold">
+                    Sexo
+                    <span aria-hidden className="ml-0.5 text-destructive">
+                      *
+                    </span>
+                  </Label>
                   <div className="flex gap-2">
                     {(
                       [
@@ -430,12 +487,7 @@ export function RegisterView() {
                 <ArrowRight data-icon="inline-end" />
               </Button>
             ) : (
-              <Button
-                type="button"
-                size="xl"
-                className="flex-1 shadow-md shadow-primary/20"
-                onClick={goNext}
-              >
+              <Button type="submit" size="xl" className="flex-1 shadow-md shadow-primary/20">
                 Continuar
                 <ArrowRight data-icon="inline-end" />
               </Button>
@@ -463,8 +515,21 @@ type FieldProps = {
   autoComplete?: string;
   placeholder?: string;
   hint?: string;
+  /** Todos os campos do registo são obrigatórios salvo indicação em contrário. */
+  optional?: boolean;
+  minLength?: number;
+  max?: string;
+  invalid?: boolean;
 };
 
+/**
+ * Campo do registo.
+ *
+ * Além da validação por mensagem, cada campo é marcado tecnicamente como
+ * obrigatório (`required` + `aria-required`) e transporta as restrições reais
+ * — comprimento mínimo da palavra-passe, tipo do campo, data máxima. Era o que
+ * faltava no protótipo testado: a mensagem existia, o atributo não.
+ */
 function Field({
   id,
   label,
@@ -474,11 +539,22 @@ function Field({
   autoComplete,
   placeholder,
   hint,
+  optional = false,
+  minLength,
+  max,
+  invalid,
 }: FieldProps) {
   return (
     <div className="space-y-2">
       <Label htmlFor={id} className="text-sm font-semibold">
         {label}
+        {optional ? (
+          <span className="font-normal text-muted-foreground"> (opcional)</span>
+        ) : (
+          <span aria-hidden className="ml-0.5 text-destructive">
+            *
+          </span>
+        )}
       </Label>
       <Input
         id={id}
@@ -490,9 +566,19 @@ function Field({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
+        required={!optional}
+        aria-required={!optional}
+        aria-invalid={invalid || undefined}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        minLength={minLength}
+        max={max}
         className="h-11 rounded-xl px-3.5"
       />
-      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+      {hint ? (
+        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+          {hint}
+        </p>
+      ) : null}
     </div>
   );
 }

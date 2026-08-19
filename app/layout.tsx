@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { Archivo, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
+import { Nunito, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { DemoSync } from "@/components/layout/demo-sync";
 import { cn } from "@/lib/utils";
 
 const sans = Plus_Jakarta_Sans({
@@ -9,17 +10,26 @@ const sans = Plus_Jakarta_Sans({
   display: "swap",
 });
 
-/** Grotesca institucional usada nos títulos do site público. */
-const heading = Archivo({
+/**
+ * Títulos em Nunito: terminações arredondadas e formas abertas, mais próximas
+ * de uma família com crianças do que a grotesca anterior, sem perder o registo
+ * institucional de um hospital.
+ */
+const heading = Nunito({
   subsets: ["latin"],
-  variable: "--font-archivo",
+  variable: "--font-heading",
   weight: ["500", "600", "700", "800"],
   display: "swap",
 });
 
+/**
+ * Monoespaçada reservada exclusivamente à demonstração USSD — o ecrã do
+ * telemóvel, o simulador e o código `*123#`. Fora daí, a plataforma fala com a
+ * voz da tipografia de texto.
+ */
 const mono = JetBrains_Mono({
   subsets: ["latin"],
-  variable: "--font-geist-mono",
+  variable: "--font-ussd",
   display: "swap",
 });
 
@@ -51,6 +61,7 @@ export default function RootLayout({
           "font-sans antialiased",
         )}
       >
+        <DemoSync />
         {children}
       </body>
     </html>

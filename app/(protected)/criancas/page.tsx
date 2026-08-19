@@ -4,8 +4,11 @@ import { useState } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
+  Archive,
+  ArchiveRestore,
   Baby,
   CheckCircle2,
+  Info,
   Pencil,
   Plus,
   Stethoscope,
@@ -15,7 +18,7 @@ import {
 import { AppHeader } from "@/components/layout/app-header";
 import { EmptyState, PageShell } from "@/components/layout/page-shell";
 import { useSession } from "@/components/layout/session-provider";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -47,13 +50,18 @@ const emptyForm: FormState = { name: "", birthDate: "", sex: "", notes: "" };
 export default function CriancasPage() {
   const user = useSession();
 
-  const children = useClinicStore((state) => state.children).filter(
+  const allChildren = useClinicStore((state) => state.children).filter(
     (child) => child.guardianId === user.id,
   );
+  const children = allChildren.filter((child) => !child.archived);
+  const archived = allChildren.filter((child) => child.archived);
+
   const consultations = useClinicStore((state) => state.consultations);
   const addChild = useClinicStore((state) => state.addChild);
   const updateChild = useClinicStore((state) => state.updateChild);
   const removeChild = useClinicStore((state) => state.removeChild);
+  const archiveChild = useClinicStore((state) => state.archiveChild);
+  const restoreChild = useClinicStore((state) => state.restoreChild);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Child | null>(null);
@@ -115,10 +123,43 @@ export default function CriancasPage() {
     setEditing(null);
   }
 
+  /**
+   * Eliminar só quando não há nada a preservar. Havendo pedidos ou histórico
+   * clínico, a acção disponível é arquivar — o registo clínico da criança
+   * nunca é apagado.
+   */
   function handleRemove(child: Child) {
+    setError(null);
     const result = removeChild(child.id);
-    setFeedback(result.ok ? `${child.name} foi removido(a).` : null);
-    if (!result.ok) setError(result.error);
+
+    if (!result.ok) {
+      setFeedback(null);
+      setError(result.error);
+      return;
+    }
+
+    setFeedback(`${child.name} foi eliminado(a) do registo.`);
+  }
+
+  function handleArchive(child: Child) {
+    setError(null);
+    const result = archiveChild(child.id);
+
+    if (!result.ok) {
+      setFeedback(null);
+      setError(result.error);
+      return;
+    }
+
+    setFeedback(
+      `${child.name} foi arquivado(a). O histórico clínico continua guardado.`,
+    );
+  }
+
+  function handleRestore(child: Child) {
+    setError(null);
+    const result = restoreChild(child.id);
+    if (result.ok) setFeedback(`${child.name} voltou à lista activa.`);
   }
 
   return (
@@ -216,17 +257,29 @@ export default function CriancasPage() {
                   </div>
 
                   <div className="mt-5 flex gap-2 border-t border-border pt-4">
-                    <Button
-                      asChild
-                      size="sm"
-                      className="flex-1"
-                      disabled={Boolean(openRequest)}
-                    >
-                      <Link href={`/teleconsultas/novo?crianca=${child.id}`}>
+                    {/*
+                      Com um pedido em aberto não há nada a solicitar: um
+                      `Link` com `disabled` continuaria a navegar, por isso
+                      passa a ser um botão inerte com a razão à vista.
+                    */}
+                    {openRequest ? (
+                      <Button
+                        size="sm"
+                        className="flex-1"
+                        disabled
+                        title={`${openRequest.reference} ainda está em aberto`}
+                      >
                         <Stethoscope data-icon="inline-start" />
-                        Solicitar
-                      </Link>
-                    </Button>
+                        Pedido em aberto
+                      </Button>
+                    ) : (
+                      <Button asChild size="sm" className="flex-1">
+                        <Link href={`/teleconsultas/novo?crianca=${child.id}`}>
+                          <Stethoscope data-icon="inline-start" />
+                          Solicitar
+                        </Link>
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="icon-sm"
@@ -235,20 +288,80 @@ export default function CriancasPage() {
                     >
                       <Pencil />
                     </Button>
-                    <Button
-                      variant="destructive"
-                      size="icon-sm"
-                      aria-label={`Remover ${child.name}`}
-                      onClick={() => handleRemove(child)}
-                    >
-                      <Trash2 />
-                    </Button>
+                    {total === 0 ? (
+                      <Button
+                        variant="destructive"
+                        size="icon-sm"
+                        aria-label={`Eliminar ${child.name}`}
+                        title="Eliminar (só possível sem pedidos associados)"
+                        onClick={() => handleRemove(child)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="icon-sm"
+                        aria-label={`Arquivar ${child.name}`}
+                        title="Arquivar — preserva o histórico clínico"
+                        disabled={Boolean(openRequest)}
+                        onClick={() => handleArchive(child)}
+                      >
+                        <Archive />
+                      </Button>
+                    )}
                   </div>
                 </article>
               );
             })}
           </div>
         )}
+        {archived.length > 0 ? (
+          <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+            <h2 className="font-bold tracking-tight">Crianças arquivadas</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              O histórico clínico destas crianças continua guardado e pode ser
+              consultado em «Histórico clínico».
+            </p>
+
+            <ul className="mt-4 divide-y divide-border">
+              {archived.map((child) => (
+                <li
+                  key={child.id}
+                  className="flex flex-wrap items-center justify-between gap-3 py-3.5"
+                >
+                  <div>
+                    <p className="text-sm font-semibold">{child.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {describeAge(child.birthDate)} · arquivada
+                      {child.archivedAt ? ` em ${formatDate(child.archivedAt)}` : ""}
+                    </p>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleRestore(child)}
+                  >
+                    <ArchiveRestore data-icon="inline-start" />
+                    Restaurar
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        <Alert variant="info">
+          <Info />
+          <AlertTitle>Eliminar ou arquivar?</AlertTitle>
+          <AlertDescription>
+            Uma criança sem qualquer pedido pode ser eliminada. A partir do
+            momento em que existe um pedido ou histórico clínico, a opção passa
+            a ser <strong>Arquivar</strong>: o registo sai da lista activa, mas
+            toda a informação clínica é preservada.
+          </AlertDescription>
+        </Alert>
       </PageShell>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -277,6 +390,9 @@ export default function CriancasPage() {
               <Input
                 id="child-name"
                 name="child-name"
+                required
+                aria-required="true"
+                minLength={3}
                 value={form.name}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, name: event.target.value }))
@@ -295,6 +411,9 @@ export default function CriancasPage() {
                   id="child-birth"
                   name="child-birth"
                   type="date"
+                  required
+                  aria-required="true"
+                  max={new Date().toISOString().slice(0, 10)}
                   value={form.birthDate}
                   onChange={(event) =>
                     setForm((current) => ({

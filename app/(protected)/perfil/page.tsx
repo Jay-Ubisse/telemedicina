@@ -18,8 +18,17 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { maputoNeighbourhoods } from "@/lib/data/locations";
 import { useClinicStore } from "@/lib/store/clinic-store";
-import { roleLabels } from "@/lib/types/user";
+import type { Shift } from "@/lib/types/user";
+import { roleLabels, shiftLabels } from "@/lib/types/user";
 import { formatDate } from "@/lib/utils/date";
 
 export default function PerfilPage() {
@@ -38,6 +47,8 @@ export default function PerfilPage() {
     idDocument: user.idDocument ?? "",
     specialty: user.specialty ?? "",
     licenseNumber: user.licenseNumber ?? "",
+    shift: user.shift ?? "",
+    available: user.available ?? true,
     password: "",
   });
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +67,9 @@ export default function PerfilPage() {
       idDocument: form.idDocument.trim(),
       specialty: form.specialty.trim() || undefined,
       licenseNumber: form.licenseNumber.trim() || undefined,
+      ...(user.role === "PEDIATRA"
+        ? { shift: (form.shift || undefined) as Shift | undefined, available: form.available }
+        : {}),
       ...(form.password ? { password: form.password } : {}),
     });
 
@@ -143,14 +157,33 @@ export default function PerfilPage() {
                       }
                     />
                     <div className="sm:col-span-2">
-                      <ProfileField
-                        id="profile-address"
-                        label="Bairro / endereço"
+                      <Label htmlFor="profile-address" className="text-sm font-semibold">
+                        Bairro
+                      </Label>
+                      <Select
                         value={form.address}
-                        onChange={(value) =>
+                        onValueChange={(value) =>
                           setForm((c) => ({ ...c, address: value }))
                         }
-                      />
+                      >
+                        <SelectTrigger
+                          id="profile-address"
+                          className="mt-2 h-11 w-full rounded-xl"
+                        >
+                          <SelectValue placeholder="Seleccione o bairro" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {maputoNeighbourhoods.map((bairro) => (
+                            <SelectItem key={bairro} value={bairro}>
+                              {bairro}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="mt-1.5 text-xs text-muted-foreground">
+                        O serviço opera na cidade de Maputo. Não é recolhida a
+                        rua nem o número de residência.
+                      </p>
                     </div>
                   </>
                 ) : (
@@ -171,6 +204,51 @@ export default function PerfilPage() {
                         setForm((c) => ({ ...c, licenseNumber: value }))
                       }
                     />
+
+                    {user.role === "PEDIATRA" ? (
+                      <>
+                        <div>
+                          <Label htmlFor="profile-shift" className="text-sm font-semibold">
+                            Turno de escala
+                          </Label>
+                          <Select
+                            value={form.shift}
+                            onValueChange={(value) =>
+                              setForm((c) => ({ ...c, shift: value as Shift }))
+                            }
+                          >
+                            <SelectTrigger id="profile-shift" className="mt-2 h-11 w-full rounded-xl">
+                              <SelectValue placeholder="Seleccione o turno" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="MANHA">{shiftLabels.MANHA}</SelectItem>
+                              <SelectItem value="TARDE">{shiftLabels.TARDE}</SelectItem>
+                              <SelectItem value="NOITE">{shiftLabels.NOITE}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <Label htmlFor="profile-available" className="text-sm font-semibold">
+                            Disponibilidade
+                          </Label>
+                          <Select
+                            value={form.available ? "SIM" : "NAO"}
+                            onValueChange={(value) =>
+                              setForm((c) => ({ ...c, available: value === "SIM" }))
+                            }
+                          >
+                            <SelectTrigger id="profile-available" className="mt-2 h-11 w-full rounded-xl">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="SIM">Disponível no turno</SelectItem>
+                              <SelectItem value="NAO">Fora de turno</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </>
+                    ) : null}
                   </>
                 )}
 
@@ -178,9 +256,11 @@ export default function PerfilPage() {
                   id="profile-password"
                   label="Nova palavra-passe"
                   type="password"
+                  required={false}
+                  minLength={6}
                   value={form.password}
                   onChange={(value) => setForm((c) => ({ ...c, password: value }))}
-                  hint="Deixe em branco para manter a actual."
+                  hint="Deixe em branco para manter a actual. Mínimo 6 caracteres."
                 />
               </div>
 
@@ -242,6 +322,8 @@ function ProfileField({
   onChange,
   type = "text",
   hint,
+  required = true,
+  minLength,
 }: {
   id: string;
   label: string;
@@ -249,6 +331,8 @@ function ProfileField({
   onChange: (value: string) => void;
   type?: string;
   hint?: string;
+  required?: boolean;
+  minLength?: number;
 }) {
   return (
     <div>
@@ -260,6 +344,9 @@ function ProfileField({
         name={id}
         type={type}
         autoComplete="off"
+        required={required}
+        aria-required={required}
+        minLength={minLength}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="mt-2 h-11 rounded-xl px-3.5"

@@ -60,7 +60,7 @@ export function UssdDialog({
     <div className="flex-1 px-4 py-4">
       <div
         className={cn(
-          "rounded-xl border p-4 font-mono text-[0.8125rem] leading-relaxed whitespace-pre-line",
+          "rounded-xl border p-4 font-ussd text-[0.8125rem] leading-relaxed whitespace-pre-line",
           tone === "danger"
             ? "border-destructive/30 bg-destructive/8 text-destructive"
             : tone === "success"

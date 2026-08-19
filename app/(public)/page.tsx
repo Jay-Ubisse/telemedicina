@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, Check } from "lucide-react";
 
+import { CareScene } from "@/components/marketing/care-scene";
 import { SiteFooter } from "@/components/marketing/site-footer";
 import { SiteHeader } from "@/components/marketing/site-header";
 import { UssdTerminal } from "@/components/marketing/ussd-terminal";
 import { Button } from "@/components/ui/button";
+import { SEED_ANCHOR, buildSeedConsultations, seedUsers } from "@/lib/data/seed";
 import {
   criticalSymptoms,
   mildSymptoms,
@@ -33,70 +35,77 @@ export default function LandingPage() {
 }
 
 /**
- * O título ocupa toda a largura, como o cabeçalho de um documento
- * institucional. O `*123#` é composto em mono dentro da display — o código é
- * literalmente parte da frase, porque é o produto.
+ * Abertura da página.
+ *
+ * O relatório de testes pediu que a primeira área comunicasse de imediato o
+ * conceito de telepediatria — cuidado pediátrico, proximidade familiar e
+ * acesso por telemóvel — em vez de abrir com o código USSD isolado. Daí o par
+ * texto + cena de teleconsulta, com a linguagem acolhedora e institucional e
+ * a ressalva explícita de que o serviço não substitui a urgência.
  */
 const heroChecks = [
-  "Funciona sem internet",
-  "Triagem em até 30 minutos",
+  "Com ou sem internet",
   "Pediatras do HGM",
+  "Crianças dos 0 aos 15 anos",
   "Cidade de Maputo",
 ];
 
 function Masthead() {
   return (
     <section className="border-b border-border bg-paper">
-      <div className="mx-auto w-full max-w-[86rem] px-5 pt-16 pb-14 sm:px-8 lg:pt-24 lg:pb-20">
-        <div className="flex items-center gap-2.5">
-          <span aria-hidden className="h-px w-8 bg-primary" />
-          <p className="font-mono text-[0.6875rem] tracking-[0.2em] text-primary uppercase">
-            Teleconsulta pediátrica · 0 aos 15 anos
+      <div className="mx-auto grid w-full max-w-[86rem] items-center gap-12 px-5 pt-14 pb-16 sm:px-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-16 lg:pt-20 lg:pb-24">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <span aria-hidden className="h-px w-8 bg-primary" />
+            <p className="text-[0.6875rem] tracking-[0.18em] text-primary font-semibold uppercase">
+              Hospital Geral de Mavalane · Telepediatria
+            </p>
+          </div>
+
+          <h1 className="mt-7 max-w-2xl font-heading text-[2.5rem] leading-[1.02] font-extrabold tracking-[-0.035em] text-balance sm:text-[3.25rem] lg:text-[3.75rem]">
+            Cuidado pediátrico ao alcance da sua família.
+          </h1>
+
+          <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
+            Solicite apoio pediátrico no Hospital Geral de Mavalane através do
+            telemóvel, com ou sem internet. A equipa avalia os sintomas da
+            criança, organiza o atendimento e fornece orientação clínica à
+            distância.
+          </p>
+
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            <Button asChild size="xl" className="rounded-lg">
+              <Link href="/registo">
+                Solicitar consulta
+                <ArrowRight data-icon="inline-end" />
+              </Link>
+            </Button>
+            <Button asChild size="xl" variant="outline" className="rounded-lg">
+              <Link href="/login">Já tenho conta</Link>
+            </Button>
+          </div>
+
+          <ul className="mt-9 flex flex-wrap gap-x-7 gap-y-3">
+            {heroChecks.map((item) => (
+              <li
+                key={item}
+                className="flex items-center gap-2 text-sm text-muted-foreground"
+              >
+                <Check className="size-3.5 shrink-0 text-primary" />
+                {item}
+              </li>
+            ))}
+          </ul>
+
+          <p className="mt-8 max-w-md border-l-2 border-border pl-4 text-sm leading-relaxed text-muted-foreground">
+            A telepediatria complementa o acompanhamento no hospital. Não
+            substitui consultas presenciais nem os serviços de emergência: em
+            caso de sintoma grave, ligue <span className="font-semibold text-foreground">1420</span>{" "}
+            ou dirija-se à unidade sanitária mais próxima.
           </p>
         </div>
 
-        <h1 className="mt-7 max-w-5xl font-heading text-[2.5rem] leading-[0.98] font-medium tracking-[-0.035em] text-balance sm:text-6xl lg:text-[5.25rem]">
-          <span className="text-muted-foreground">
-            Entre a sua criança e um pediatra do HGM,
-          </span>{" "}
-          <span className="block pt-2 font-extrabold text-foreground">
-            um{" "}
-            <span className="font-mono tracking-[-0.02em] text-primary">
-              *123#
-            </span>
-            .
-          </span>
-        </h1>
-
-        <p className="mt-7 max-w-md text-lg leading-relaxed text-muted-foreground">
-          Descreva os sintomas da sua criança pelo telemóvel. A equipa do HGM
-          avalia o pedido, marca a teleconsulta e devolve orientação clínica —
-          sem sair de casa.
-        </p>
-
-        <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-          <Button asChild size="xl" className="rounded-lg">
-            <Link href="/registo">
-              Solicitar consulta
-              <ArrowRight data-icon="inline-end" />
-            </Link>
-          </Button>
-          <Button asChild size="xl" variant="outline" className="rounded-lg">
-            <Link href="/login">Já tenho conta</Link>
-          </Button>
-        </div>
-
-        <ul className="mt-9 flex flex-wrap gap-x-7 gap-y-3">
-          {heroChecks.map((item) => (
-            <li
-              key={item}
-              className="flex items-center gap-2 text-sm text-muted-foreground"
-            >
-              <Check className="size-3.5 shrink-0 text-primary" />
-              {item}
-            </li>
-          ))}
-        </ul>
+        <CareScene className="mx-auto w-full max-w-lg lg:max-w-none" />
       </div>
     </section>
   );
@@ -107,7 +116,7 @@ function Instrument() {
   return (
     <section id="servico" className="scroll-mt-24 border-b border-border">
       <div className="mx-auto w-full max-w-[86rem] px-5 py-14 sm:px-8 lg:py-20">
-        <p className="font-mono text-[0.6875rem] tracking-[0.2em] text-primary uppercase">
+        <p className="text-[0.6875rem] tracking-[0.2em] text-primary font-semibold uppercase">
           Como funciona
         </p>
         <h2 className="mt-5 max-w-2xl font-heading text-3xl font-extrabold tracking-[-0.03em] text-balance sm:text-4xl">
@@ -117,11 +126,11 @@ function Instrument() {
         {/* Moldura de simulação: terminal + registo resultante */}
         <div className="mt-10 overflow-hidden rounded-xl border border-border bg-card">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/50 px-4 py-2.5">
-            <p className="font-mono text-[0.625rem] tracking-[0.16em] text-muted-foreground uppercase">
+            <p className="text-[0.625rem] tracking-[0.16em] text-muted-foreground font-semibold uppercase">
               Simulação · pedido real em 4 passos
             </p>
-            <p className="font-mono text-[0.625rem] tracking-[0.16em] text-muted-foreground uppercase">
-              Dados fictícios
+            <p className="text-[0.625rem] tracking-[0.16em] text-muted-foreground font-semibold uppercase">
+              Dados fictícios e anonimizados
             </p>
           </div>
 
@@ -135,12 +144,20 @@ function Instrument() {
   );
 }
 
-/** O que o pedido USSD produz do lado do hospital. */
+/**
+ * O que o pedido USSD produz do lado do hospital.
+ *
+ * Os dados são fictícios e ainda assim apresentados anonimizados: a criança é
+ * identificada por iniciais e referência, o número aparece parcialmente
+ * ocultado e a localização fica-se pelo bairro. É a mesma regra que vigora
+ * dentro da plataforma.
+ */
 function ResultingRecord() {
   const rows = [
     { label: "Referência", value: "R-1042" },
-    { label: "Criança", value: "4 anos" },
-    { label: "Localização", value: "Hulene B, Maputo" },
+    { label: "Criança", value: "T. M. · 4 anos" },
+    { label: "Contacto", value: "+258 84 *** 3390" },
+    { label: "Bairro", value: "Hulene B, Maputo" },
     { label: "Sintoma", value: "Febre alta" },
     { label: "Canal", value: "Videochamada" },
   ];
@@ -148,10 +165,10 @@ function ResultingRecord() {
   return (
     <div className="flex flex-col bg-card">
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
-        <span className="font-mono text-[0.625rem] tracking-[0.18em] text-muted-foreground uppercase">
+        <span className="text-[0.625rem] tracking-[0.18em] text-muted-foreground font-semibold uppercase">
           Fila de triagem
         </span>
-        <span className="rounded-sm bg-warning/20 px-1.5 py-0.5 font-mono text-[0.625rem] font-semibold tracking-[0.12em] text-warning-foreground uppercase">
+        <span className="rounded-sm bg-warning/20 px-1.5 py-0.5 text-[0.625rem] font-semibold tracking-[0.12em] text-warning-foreground uppercase">
           Urgente
         </span>
       </div>
@@ -162,7 +179,7 @@ function ResultingRecord() {
             key={row.label}
             className="flex items-baseline justify-between gap-4 border-b border-border/70 py-2.5 last:border-0"
           >
-            <dt className="font-mono text-[0.625rem] tracking-[0.14em] text-muted-foreground uppercase">
+            <dt className="text-[0.625rem] tracking-[0.14em] text-muted-foreground font-semibold uppercase">
               {row.label}
             </dt>
             <dd className="text-sm font-medium">{row.value}</dd>
@@ -171,7 +188,7 @@ function ResultingRecord() {
       </dl>
 
       <div className="border-t border-border px-4 py-4">
-        <p className="font-mono text-[0.625rem] tracking-[0.14em] text-muted-foreground uppercase">
+        <p className="text-[0.625rem] tracking-[0.14em] text-muted-foreground font-semibold uppercase">
           Agendado
         </p>
         <p className="mt-1.5 font-heading text-2xl font-bold tracking-tight">
@@ -185,16 +202,38 @@ function ResultingRecord() {
   );
 }
 
+/**
+ * Indicadores da demonstração.
+ *
+ * A versão anterior anunciava 12 340 consultas e 48 pediatras — números que
+ * não correspondiam a nada dentro do protótipo. Passam a ser lidos dos dados
+ * de demonstração e ficam identificados como ilustrativos.
+ */
+const demoConsultations = buildSeedConsultations(SEED_ANCHOR);
+const demoPediatricians = seedUsers.filter((user) => user.role === "PEDIATRA");
+
 const evidence = [
-  { value: "12 340", label: "Consultas realizadas" },
-  { value: "48", label: "Pediatras na rede" },
-  { value: "18 min", label: "Mediana de triagem" },
-  { value: "98%", label: "Famílias satisfeitas" },
+  {
+    value: String(demoConsultations.length),
+    label: "Pedidos na demonstração",
+  },
+  {
+    value: String(demoPediatricians.length),
+    label: "Pediatras na escala",
+  },
+  { value: "0–15", label: "Anos de idade atendidos" },
+  { value: "10 min", label: "Validade do link da sala" },
 ];
 
 function Evidence() {
   return (
     <section className="border-b border-border bg-paper">
+      <div className="mx-auto w-full max-w-[86rem] px-5 pt-8 sm:px-8">
+        <p className="text-[0.625rem] tracking-[0.16em] text-muted-foreground font-semibold uppercase">
+          Dados ilustrativos do protótipo · não são estatísticas do serviço
+        </p>
+      </div>
+
       <div className="mx-auto grid w-full max-w-[86rem] grid-cols-2 px-5 sm:px-8 lg:grid-cols-4">
         {evidence.map((item, index) => (
           <div
@@ -209,7 +248,7 @@ function Evidence() {
             <p className="font-heading text-3xl font-extrabold tracking-[-0.03em] text-primary tabular-nums lg:text-[2.75rem]">
               {item.value}
             </p>
-            <p className="mt-2 font-mono text-[0.625rem] tracking-[0.14em] text-muted-foreground uppercase">
+            <p className="mt-2 text-[0.625rem] tracking-[0.14em] text-muted-foreground font-semibold uppercase">
               {item.label}
             </p>
           </div>
@@ -253,7 +292,7 @@ function TriageProtocol() {
     <section id="triagem" className="scroll-mt-24 border-b border-border">
       <div className="mx-auto w-full max-w-[86rem] px-5 py-14 sm:px-8 lg:py-20">
         <div className="max-w-2xl">
-          <p className="font-mono text-[0.6875rem] tracking-[0.2em] text-primary uppercase">
+          <p className="text-[0.6875rem] tracking-[0.2em] text-primary font-semibold uppercase">
             Protocolo de triagem
           </p>
           <h2 className="mt-5 font-heading text-3xl font-extrabold tracking-[-0.03em] text-balance sm:text-4xl">
@@ -271,7 +310,7 @@ function TriageProtocol() {
             {["Nível", "Sintomas", "Resposta"].map((head) => (
               <p
                 key={head}
-                className="font-mono text-[0.625rem] tracking-[0.16em] text-muted-foreground uppercase"
+                className="text-[0.625rem] tracking-[0.16em] text-muted-foreground font-semibold uppercase"
               >
                 {head}
               </p>
@@ -358,14 +397,14 @@ function Journey() {
       <div className="mx-auto w-full max-w-[86rem] px-5 py-14 sm:px-8 lg:py-20">
         <div className="flex flex-wrap items-end justify-between gap-6">
           <div className="max-w-xl">
-            <p className="font-mono text-[0.6875rem] tracking-[0.2em] text-primary uppercase">
+            <p className="text-[0.6875rem] tracking-[0.2em] text-primary font-semibold uppercase">
               Percurso
             </p>
             <h2 className="mt-5 font-heading text-3xl font-extrabold tracking-[-0.03em] text-balance sm:text-4xl">
               De um pedido a uma orientação, em menos de uma hora.
             </h2>
           </div>
-          <p className="font-mono text-[0.625rem] tracking-[0.14em] text-muted-foreground uppercase">
+          <p className="text-[0.625rem] tracking-[0.14em] text-muted-foreground font-semibold uppercase">
             Tempo decorrido · mediana
           </p>
         </div>
@@ -377,7 +416,7 @@ function Journey() {
                 aria-hidden
                 className="absolute -top-px left-0 h-px w-10 bg-primary"
               />
-              <p className="font-mono text-sm font-semibold tracking-[0.08em] text-primary tabular-nums">
+              <p className="text-sm font-semibold tracking-[0.08em] text-primary tabular-nums">
                 {item.stamp}
               </p>
               <h3 className="mt-3 font-heading text-lg font-bold tracking-tight">
@@ -418,7 +457,7 @@ function Professionals() {
       <div className="mx-auto w-full max-w-[86rem] px-5 py-16 sm:px-8 lg:py-24">
         <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:gap-16">
           <div>
-            <p className="font-mono text-[0.6875rem] tracking-[0.2em] text-primary uppercase">
+            <p className="text-[0.6875rem] tracking-[0.2em] text-primary font-semibold uppercase">
               Para profissionais
             </p>
             <h2 className="mt-5 max-w-lg font-heading text-3xl font-extrabold tracking-[-0.03em] text-balance sm:text-4xl">
@@ -462,11 +501,14 @@ function Professionals() {
   );
 }
 
-/** Amostra do painel clínico. Dados fictícios, sem qualquer criança real. */
+/**
+ * Amostra do painel clínico. Dados fictícios e sem identificação: é assim que
+ * a fila de triagem aparece a um pediatra antes de assumir o caso.
+ */
 function QueuePreview() {
   const queue = [
     { ref: "R-1042", age: "4 anos", symptom: "Febre alta, tosse", level: "Urgente", tone: "text-warning" },
-    { ref: "R-1039", age: "3 anos", symptom: "Febre, dor de cabeça", level: "Normal", tone: "text-success" },
+    { ref: "R-1039", age: "3 anos", symptom: "Manchas na pele (texto livre)", level: "Avaliação", tone: "text-primary" },
     { ref: "R-1030", age: "6 anos", symptom: "Convulsões", level: "Crítico", tone: "text-destructive" },
     { ref: "R-1036", age: "9 anos", symptom: "Vómitos persistentes", level: "Urgente", tone: "text-warning" },
   ];
@@ -474,10 +516,10 @@ function QueuePreview() {
   return (
     <div className="overflow-hidden rounded-xl border border-ink-line bg-white/[0.04]">
       <div className="flex items-center justify-between gap-3 border-b border-ink-line px-5 py-3">
-        <p className="font-mono text-[0.625rem] tracking-[0.16em] text-ink-muted uppercase">
+        <p className="text-[0.625rem] tracking-[0.16em] text-ink-muted font-semibold uppercase">
           Fila de triagem · hoje
         </p>
-        <p className="font-mono text-[0.625rem] tracking-[0.16em] text-ink-muted uppercase">
+        <p className="text-[0.625rem] tracking-[0.16em] text-ink-muted font-semibold uppercase">
           Amostra
         </p>
       </div>
@@ -490,13 +532,13 @@ function QueuePreview() {
           >
             <div className="min-w-0">
               <p className="flex items-baseline gap-2">
-                <span className="font-mono text-xs text-ink-muted">{item.ref}</span>
+                <span className="text-xs text-ink-muted">{item.ref}</span>
                 <span className="text-sm font-medium">Criança · {item.age}</span>
               </p>
               <p className="mt-1 truncate text-sm text-ink-muted">{item.symptom}</p>
             </div>
             <span
-              className={`shrink-0 font-mono text-[0.625rem] font-semibold tracking-[0.14em] uppercase ${item.tone}`}
+              className={`shrink-0 text-[0.625rem] font-semibold tracking-[0.14em] uppercase ${item.tone}`}
             >
               {item.level}
             </span>
@@ -506,9 +548,24 @@ function QueuePreview() {
 
       <div className="grid grid-cols-3 border-t border-ink-line">
         {[
-          { value: "7", label: "Pendentes" },
-          { value: "3", label: "Em triagem" },
-          { value: "12", label: "Hoje" },
+          {
+            value: String(
+              demoConsultations.filter((item) => item.status === "PENDENTE").length,
+            ),
+            label: "Pendentes",
+          },
+          {
+            value: String(
+              demoConsultations.filter((item) => item.status === "AGENDADA").length,
+            ),
+            label: "Agendadas",
+          },
+          {
+            value: String(
+              demoConsultations.filter((item) => item.status === "EM_CURSO").length,
+            ),
+            label: "Em curso",
+          },
         ].map((stat, index) => (
           <div
             key={stat.label}
@@ -517,7 +574,7 @@ function QueuePreview() {
             <p className="font-heading text-xl font-extrabold tabular-nums">
               {stat.value}
             </p>
-            <p className="mt-0.5 font-mono text-[0.5625rem] tracking-[0.14em] text-ink-muted uppercase">
+            <p className="mt-0.5 text-[0.5625rem] tracking-[0.14em] text-ink-muted font-semibold uppercase">
               {stat.label}
             </p>
           </div>
@@ -540,14 +597,14 @@ function Specification() {
   return (
     <section className="border-b border-border">
       <div className="mx-auto w-full max-w-[86rem] px-5 py-14 sm:px-8 lg:py-16">
-        <p className="font-mono text-[0.6875rem] tracking-[0.2em] text-muted-foreground uppercase">
+        <p className="text-[0.6875rem] tracking-[0.2em] text-muted-foreground font-semibold uppercase">
           Ficha técnica
         </p>
 
         <dl className="mt-8 grid gap-x-12 border-t border-border sm:grid-cols-2 lg:grid-cols-3">
           {specification.map((item) => (
             <div key={item.term} className="border-b border-border py-4">
-              <dt className="font-mono text-[0.625rem] tracking-[0.14em] text-muted-foreground uppercase">
+              <dt className="text-[0.625rem] tracking-[0.14em] text-muted-foreground font-semibold uppercase">
                 {item.term}
               </dt>
               <dd className="mt-1.5 text-sm font-medium">{item.detail}</dd>

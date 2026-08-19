@@ -22,7 +22,15 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { maputoNeighbourhoods } from "@/lib/data/locations";
 import {
   criticalSymptoms,
   mildSymptoms,
@@ -46,7 +54,7 @@ export default function NovoPedidoPage() {
   const searchParams = useSearchParams();
 
   const children = useClinicStore((state) => state.children).filter(
-    (child) => child.guardianId === user.id,
+    (child) => child.guardianId === user.id && !child.archived,
   );
   const createConsultation = useClinicStore((state) => state.createConsultation);
 
@@ -164,7 +172,7 @@ export default function NovoPedidoPage() {
               {success.message}
             </p>
 
-            <p className="mt-5 font-mono text-sm font-semibold">
+            <p className="mt-5 text-sm font-semibold">
               Referência {success.reference}
             </p>
 
@@ -356,19 +364,36 @@ export default function NovoPedidoPage() {
                   </div>
                 </div>
 
+                {/*
+                  Bairro em lista fechada, como no menu USSD: um pedido de
+                  teleconsulta não precisa da rua nem do número de porta.
+                */}
                 <div>
                   <Label htmlFor="location" className="text-sm font-semibold">
-                    Localização
+                    Bairro
+                    <span aria-hidden className="ml-0.5 text-destructive">
+                      *
+                    </span>
                   </Label>
-                  <Input
-                    id="location"
-                    value={location}
-                    onChange={(event) => setLocation(event.target.value)}
-                    placeholder="Bairro e avenida / rua"
-                    className="mt-2 h-11 rounded-xl px-3.5"
-                  />
+                  <Select value={location} onValueChange={setLocation}>
+                    <SelectTrigger
+                      id="location"
+                      aria-required="true"
+                      className="mt-2 h-11 w-full rounded-xl"
+                    >
+                      <SelectValue placeholder="Seleccione o bairro" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {maputoNeighbourhoods.map((bairro) => (
+                        <SelectItem key={bairro} value={bairro}>
+                          {bairro}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    O serviço opera na cidade de Maputo.
+                    O serviço opera na cidade de Maputo. Não é recolhida a rua
+                    nem o número de residência.
                   </p>
                 </div>
 
@@ -439,7 +464,7 @@ export default function NovoPedidoPage() {
                 type="submit"
                 size="xl"
                 className="mt-5 w-full shadow-md shadow-primary/20"
-                disabled={!hasSelection || !childId}
+                disabled={!hasSelection || !childId || !location}
               >
                 Submeter pedido
                 <ArrowRight data-icon="inline-end" />
