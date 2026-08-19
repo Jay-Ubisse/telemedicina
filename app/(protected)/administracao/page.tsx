@@ -15,9 +15,19 @@ import {
   Video,
   Smartphone,
   Activity,
+  CalendarCheck2,
+  FileSpreadsheet,
+  Inbox,
+  Stethoscope,
+  Trash2,
 } from "lucide-react";
 
 import { BreakdownBars } from "@/components/dashboard/breakdown-bars";
+import {
+  PriorityChart,
+  StageChart,
+  VolumeChart,
+} from "@/components/dashboard/clinic-charts";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { AppHeader } from "@/components/layout/app-header";
 import { EmptyState, PageShell } from "@/components/layout/page-shell";
@@ -59,21 +69,22 @@ import {
 } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useClinicStore } from "@/lib/store/clinic-store";
-import type { ConsultationChannel, ConsultationPriority } from "@/lib/types/consultation";
+import type { ConsultationChannel } from "@/lib/types/consultation";
 import {
   channelLabels,
   priorityLabels,
   statusLabels,
 } from "@/lib/types/consultation";
-import type { User, UserRole } from "@/lib/types/user";
-import { roleLabels, shortRoleLabels } from "@/lib/types/user";
+import type { Shift, User, UserRole } from "@/lib/types/user";
 import {
-  getChannelBreakdown,
-  getDailyVolume,
-  getMetrics,
-  getPriorityBreakdown,
-} from "@/lib/utils/consultations";
+  roleLabels,
+  shiftLabels,
+  shortRoleLabels,
+  shortShiftLabels,
+} from "@/lib/types/user";
+import { getChannelBreakdown, getMetrics } from "@/lib/utils/consultations";
 import { downloadCsv, toCsv } from "@/lib/utils/csv";
+import { downloadExcel, toExcelWorkbook, type Sheet } from "@/lib/utils/excel";
 import { formatDate, formatDateTime } from "@/lib/utils/date";
 import { cn } from "@/lib/utils";
 
@@ -85,14 +96,9 @@ type UserForm = {
   phone: string;
   specialty: string;
   licenseNumber: string;
+  shift: Shift | "";
+  available: boolean;
   address: string;
-};
-
-const priorityBarColors: Record<ConsultationPriority, string> = {
-  CRITICA: "bg-destructive",
-  URGENTE: "bg-warning",
-  AVALIACAO: "bg-primary",
-  NORMAL: "bg-success",
 };
 
 const channelBarColors: Record<ConsultationChannel, string> = {
@@ -108,8 +114,18 @@ const emptyUserForm: UserForm = {
   phone: "",
   specialty: "",
   licenseNumber: "",
+  shift: "",
+  available: true,
   address: "",
 };
+
+/** Especialidades sugeridas para a escala de pediatria do HGM. */
+const specialtySuggestions = [
+  "Pediatria Geral",
+  "Pediatria e Neonatologia",
+  "Urgência / Triagem Pediátrica",
+  "Seguimento de casos não urgentes",
+];
 
 export default function AdministracaoPage() {
   const user = useSession();
@@ -120,6 +136,7 @@ export default function AdministracaoPage() {
   const createUser = useClinicStore((state) => state.createUser);
   const updateUser = useClinicStore((state) => state.updateUser);
   const setUserActive = useClinicStore((state) => state.setUserActive);
+  const removeUser = useClinicStore((state) => state.removeUser);
 
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -127,24 +144,17 @@ export default function AdministracaoPage() {
   const [form, setForm] = useState<UserForm>(emptyUserForm);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
 
-  const metrics = useMemo(() => getMetrics(consultations), [consultations]);
-  // Os gráficos são derivados dos pedidos reais, por isso actualizam-se sozinhos
-  // sempre que a lista de consultas muda.
-  const volume = useMemo(() => getDailyVolume(consultations, 7), [consultations]);
-  const maxVolume = Math.max(...volume.map((entry) => entry.total), 1);
-
-  const priorityBreakdown = useMemo(
-    () =>
-      getPriorityBreakdown(consultations).map((entry) => ({
-        key: entry.priority,
-        label: priorityLabels[entry.priority],
-        total: entry.total,
-        colorClassName: priorityBarColors[entry.priority],
-      })),
-    [consultations],
+  const pediatricians = useMemo(
+    () => users.filter((item) => item.role === "PEDIATRA"),
+    [users],
   );
 
+  const metrics = useMemo(() => getMetrics(consultations), [consultations]);
+
+  // Os gráficos derivam dos pedidos reais, por isso actualizam-se sozinhos
+  // sempre que a lista de consultas muda.
   const channelBreakdown = useMemo(
     () =>
       getChannelBreakdown(consultations).map((entry) => ({
@@ -185,6 +195,8 @@ export default function AdministracaoPage() {
       phone: target.phone,
       specialty: target.specialty ?? "",
       licenseNumber: target.licenseNumber ?? "",
+      shift: target.shift ?? "",
+      available: target.available ?? true,
       address: target.address ?? "",
     });
     setError(null);
@@ -195,6 +207,39 @@ export default function AdministracaoPage() {
     event.preventDefault();
     setError(null);
 
+    // Validação explícita antes de chegar à store: mensagens por campo e não
+    // apenas um aviso genérico no fim.
+    if (form.name.trim().length < 3) {
+      setError("Indique o nome completo do utilizador.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      setError("Indique um email válido (ex.: nome@hgm.mz).");
+      return;
+    }
+    if (form.password.length < 6) {
+      setError("A palavra-passe deve ter pelo menos 6 caracteres.");
+      return;
+    }
+    if (form.phone.replace(/\D/g, "").length < 9) {
+      setError("Indique um número de telefone válido (9 dígitos).");
+      return;
+    }
+    if (form.role === "PEDIATRA") {
+      if (!form.specialty.trim()) {
+        setError("Indique a especialidade do pediatra.");
+        return;
+      }
+      if (!form.licenseNumber.trim()) {
+        setError("Indique o número da Ordem dos Médicos.");
+        return;
+      }
+      if (!form.shift) {
+        setError("Seleccione o turno de escala do pediatra.");
+        return;
+      }
+    }
+
     const result = editing
       ? updateUser(editing.id, {
           name: form.name.trim(),
@@ -204,6 +249,8 @@ export default function AdministracaoPage() {
           phone: form.phone.trim(),
           specialty: form.specialty.trim() || undefined,
           licenseNumber: form.licenseNumber.trim() || undefined,
+          shift: form.role === "PEDIATRA" ? (form.shift as Shift) : undefined,
+          available: form.role === "PEDIATRA" ? form.available : undefined,
           address: form.address.trim() || undefined,
         })
       : createUser({
@@ -214,6 +261,8 @@ export default function AdministracaoPage() {
           phone: form.phone,
           specialty: form.specialty,
           licenseNumber: form.licenseNumber,
+          shift: form.role === "PEDIATRA" ? (form.shift as Shift) : undefined,
+          available: form.available,
           address: form.address,
         });
 
@@ -232,50 +281,153 @@ export default function AdministracaoPage() {
     setForm(emptyUserForm);
   }
 
-  function exportConsultations() {
-    const rows = consultations.map((item) => ({
-      Referencia: item.reference,
-      Crianca: item.childName,
-      Idade: item.childAgeYears,
-      Encarregado: item.guardianName,
-      Telefone: item.phone,
-      Localizacao: item.location,
-      Sintomas: [...item.symptoms, item.otherSymptom].filter(Boolean).join(" | "),
-      Canal: channelLabels[item.channel],
-      Prioridade: priorityLabels[item.priority],
-      Estado: statusLabels[item.status],
-      Origem: item.source,
-      Submetido: formatDateTime(item.createdAt),
-      Agendado: item.scheduledAt ? formatDateTime(item.scheduledAt) : "",
-      Pediatra: item.assignedDoctorName ?? "",
-      Orientacao: item.guidance,
-      Encaminhamento: item.referralReason,
-    }));
+  /**
+   * Linhas usadas tanto no CSV como no livro Excel — uma só definição das
+   * colunas evita que os dois ficheiros divirjam.
+   */
+  const consultationRows = useMemo(
+    () =>
+      consultations.map((item) => ({
+        Referencia: item.reference,
+        Crianca: item.childName,
+        Idade: item.childAgeYears,
+        Encarregado: item.guardianName,
+        Telefone: item.phone,
+        Bairro: item.location,
+        Sintomas: [...item.symptoms, item.otherSymptom].filter(Boolean).join(" | "),
+        Canal: channelLabels[item.channel],
+        Prioridade: priorityLabels[item.priority],
+        Estado: statusLabels[item.status],
+        Origem: item.source,
+        Submetido: formatDateTime(item.createdAt),
+        Agendado: item.scheduledAt ? formatDateTime(item.scheduledAt) : "",
+        Pediatra: item.assignedDoctorName ?? "",
+        Orientacao: item.guidance,
+        Encaminhamento: item.referralReason,
+      })),
+    [consultations],
+  );
 
+  const userRows = useMemo(
+    () =>
+      users.map((item) => ({
+        Nome: item.name,
+        Email: item.email,
+        Perfil: roleLabels[item.role],
+        Telefone: item.phone,
+        Especialidade: item.specialty ?? "",
+        Ordem: item.licenseNumber ?? "",
+        Turno: item.shift ? shiftLabels[item.shift] : "",
+        Disponivel:
+          item.role === "PEDIATRA" ? (item.available ? "Sim" : "Não") : "",
+        Estado: item.active ? "Activo" : "Inactivo",
+        Criado: formatDate(item.createdAt),
+      })),
+    [users],
+  );
+
+  function exportConsultationsCsv() {
     downloadCsv(
       `hgm-teleconsultas-${new Date().toISOString().slice(0, 10)}.csv`,
-      toCsv(rows),
+      toCsv(consultationRows),
     );
-    setFeedback(`Exportadas ${rows.length} teleconsultas para CSV.`);
+    setFeedback(`Exportadas ${consultationRows.length} teleconsultas para CSV.`);
   }
 
   function exportUsers() {
-    const rows = users.map((item) => ({
-      Nome: item.name,
-      Email: item.email,
-      Perfil: roleLabels[item.role],
-      Telefone: item.phone,
-      Especialidade: item.specialty ?? "",
-      Ordem: item.licenseNumber ?? "",
-      Estado: item.active ? "Activo" : "Inactivo",
-      Criado: formatDate(item.createdAt),
-    }));
-
     downloadCsv(
       `hgm-utilizadores-${new Date().toISOString().slice(0, 10)}.csv`,
-      toCsv(rows),
+      toCsv(userRows),
     );
-    setFeedback(`Exportados ${rows.length} utilizadores para CSV.`);
+    setFeedback(`Exportados ${userRows.length} utilizadores para CSV.`);
+  }
+
+  /** Livro Excel com três folhas: resumo, teleconsultas e utilizadores. */
+  function exportWorkbook() {
+    const today = new Date();
+
+    const summary: Sheet = {
+      name: "Resumo",
+      notes: [
+        "Hospital Geral de Mavalane — Telepediatria",
+        `Relatório gerado em ${formatDateTime(today.toISOString())}`,
+        "Dados de demonstração do protótipo.",
+      ],
+      columns: [{ header: "Indicador", width: 220 }, { header: "Valor", width: 90 }],
+      rows: [
+        ["Total de pedidos", consultations.length],
+        ["Pendentes", metrics.pending],
+        ["Agendadas", metrics.scheduled],
+        ["Em curso", metrics.inProgress],
+        ["Concluídas", metrics.completed],
+        ["Encaminhadas", metrics.referred],
+        ["Pedidos submetidos por USSD", metrics.fromUssd],
+        ["Teleconsultas por videochamada", metrics.video],
+        ["Utilizadores registados", users.length],
+        ["Utilizadores activos", users.filter((item) => item.active).length],
+        ["Pediatras na escala", pediatricians.length],
+        ["Crianças registadas", children.length],
+      ],
+    };
+
+    const consultationsSheet: Sheet = {
+      name: "Teleconsultas",
+      columns: [
+        { header: "Referência", width: 80 },
+        { header: "Criança", width: 150 },
+        { header: "Idade", width: 50 },
+        { header: "Encarregado", width: 150 },
+        { header: "Telefone", width: 120 },
+        { header: "Bairro", width: 120 },
+        { header: "Sintomas", width: 220 },
+        { header: "Canal", width: 110 },
+        { header: "Prioridade", width: 110 },
+        { header: "Estado", width: 100 },
+        { header: "Origem", width: 60 },
+        { header: "Submetido", width: 130 },
+        { header: "Agendado", width: 130 },
+        { header: "Pediatra", width: 150 },
+        { header: "Orientação", width: 260 },
+        { header: "Encaminhamento", width: 260 },
+      ],
+      rows: consultationRows.map((row) => Object.values(row)),
+    };
+
+    const usersSheet: Sheet = {
+      name: "Utilizadores",
+      columns: [
+        { header: "Nome", width: 160 },
+        { header: "Email", width: 180 },
+        { header: "Perfil", width: 140 },
+        { header: "Telefone", width: 120 },
+        { header: "Especialidade", width: 180 },
+        { header: "Nº da Ordem", width: 90 },
+        { header: "Turno", width: 130 },
+        { header: "Disponível", width: 80 },
+        { header: "Estado", width: 80 },
+        { header: "Registado", width: 100 },
+      ],
+      rows: userRows.map((row) => Object.values(row)),
+    };
+
+    downloadExcel(
+      `hgm-relatorio-${today.toISOString().slice(0, 10)}.xls`,
+      toExcelWorkbook([summary, consultationsSheet, usersSheet]),
+    );
+    setFeedback(
+      "Relatório Excel exportado com as folhas Resumo, Teleconsultas e Utilizadores.",
+    );
+  }
+
+  function handleRemoveUser(target: User) {
+    const result = removeUser(target.id);
+    if (!result.ok) {
+      setFeedback(null);
+      setPageError(result.error);
+      return;
+    }
+    setPageError(null);
+    setFeedback(`${target.name} foi eliminado do sistema.`);
   }
 
   return (
@@ -297,6 +449,14 @@ export default function AdministracaoPage() {
           <Alert variant="success">
             <CheckCircle2 />
             <AlertDescription>{feedback}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {pageError ? (
+          <Alert variant="destructive">
+            <AlertCircle />
+            <AlertTitle>Operação não permitida</AlertTitle>
+            <AlertDescription>{pageError}</AlertDescription>
           </Alert>
         ) : null}
 
@@ -341,6 +501,76 @@ export default function AdministracaoPage() {
 
           {/* --- Utilizadores --- */}
           <TabsContent value="utilizadores" className="mt-5 space-y-4">
+            {/*
+              Escala de pediatria: especialidade, turno e disponibilidade. Os
+              turnos estão distribuídos — nunca aparecem todos disponíveis ao
+              mesmo tempo.
+            */}
+            <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+              <div className="flex flex-wrap items-baseline justify-between gap-3">
+                <h2 className="font-bold tracking-tight">Escala de pediatras</h2>
+                <p className="text-sm text-muted-foreground">
+                  {pediatricians.filter((item) => item.available && item.active).length}{" "}
+                  de {pediatricians.length} disponíveis neste momento
+                </p>
+              </div>
+
+              <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {pediatricians.map((doctor) => (
+                  <li
+                    key={doctor.id}
+                    className="rounded-xl border border-border p-4"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+                        <Stethoscope className="size-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">
+                          {doctor.name}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {doctor.specialty ?? "Especialidade por definir"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <dl className="mt-3.5 space-y-1.5 border-t border-border pt-3 text-xs">
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-muted-foreground">Turno</dt>
+                        <dd className="font-medium">
+                          {doctor.shift ? shiftLabels[doctor.shift] : "—"}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-muted-foreground">Disponibilidade</dt>
+                        <dd
+                          className={cn(
+                            "font-semibold",
+                            doctor.active && doctor.available
+                              ? "text-success"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          {!doctor.active
+                            ? "Conta inactiva"
+                            : doctor.available
+                              ? "Disponível"
+                              : "Fora de turno"}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-muted-foreground">Ordem</dt>
+                        <dd className="font-medium">
+                          {doctor.licenseNumber ?? "—"}
+                        </dd>
+                      </div>
+                    </dl>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative min-w-0 flex-1 sm:max-w-md">
                 <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -412,6 +642,17 @@ export default function AdministracaoPage() {
                                 {item.specialty}
                               </span>
                             ) : null}
+                            {item.shift ? (
+                              <span className="mt-0.5 block text-xs text-muted-foreground">
+                                {shortShiftLabels[item.shift]} ·{" "}
+                                {item.available ? "disponível" : "fora de turno"}
+                              </span>
+                            ) : null}
+                            {item.provisional ? (
+                              <span className="mt-0.5 block text-xs text-warning-foreground">
+                                Conta provisória (pedido USSD)
+                              </span>
+                            ) : null}
                           </TableCell>
 
                           <TableCell className="text-muted-foreground">
@@ -480,6 +721,28 @@ export default function AdministracaoPage() {
                                   {item.active ? "Desactivar utilizador" : "Activar utilizador"}
                                 </TooltipContent>
                               </Tooltip>
+
+                              {/*
+                                Eliminação só para contas sem qualquer
+                                actividade: a store recusa apagar quem tem
+                                pedidos, crianças ou consultas registadas.
+                              */}
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="icon-sm"
+                                    aria-label={`Eliminar ${item.name}`}
+                                    disabled={item.id === user.id}
+                                    onClick={() => handleRemoveUser(item)}
+                                  >
+                                    <Trash2 />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  Eliminar (só contas sem actividade)
+                                </TooltipContent>
+                              </Tooltip>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -516,64 +779,48 @@ export default function AdministracaoPage() {
                   </p>
                 </div>
 
-                <Button variant="outline" size="lg" onClick={exportConsultations}>
-                  <Download data-icon="inline-start" />
-                  Exportar CSV
-                </Button>
-              </div>
-
-              <div className="mt-7 flex h-52 items-end gap-2 sm:gap-4">
-                {volume.map((entry) => (
-                  <div
-                    key={entry.label}
-                    className="flex min-w-0 flex-1 flex-col items-center gap-2"
+                <div className="flex flex-wrap gap-2">
+                  <Button size="lg" onClick={exportWorkbook}>
+                    <FileSpreadsheet data-icon="inline-start" />
+                    Exportar Excel
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    onClick={exportConsultationsCsv}
                   >
-                    <span className="text-xs font-semibold tabular-nums">
-                      {entry.total}
-                    </span>
-
-                    <div className="flex w-full flex-1 items-end">
-                      <div
-                        className="relative w-full overflow-hidden rounded-t-lg bg-primary/85 transition-all"
-                        style={{
-                          height: `${Math.max((entry.total / maxVolume) * 100, entry.total > 0 ? 6 : 2)}%`,
-                        }}
-                      >
-                        {entry.urgent > 0 ? (
-                          <div
-                            className="absolute inset-x-0 bottom-0 bg-warning"
-                            style={{
-                              height: `${(entry.urgent / Math.max(entry.total, 1)) * 100}%`,
-                            }}
-                          />
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <span className="text-[0.625rem] text-muted-foreground tabular-nums">
-                      {entry.label}
-                    </span>
-                  </div>
-                ))}
+                    <Download data-icon="inline-start" />
+                    CSV
+                  </Button>
+                </div>
               </div>
 
-              <div className="mt-5 flex flex-wrap gap-5 border-t border-border pt-4 text-xs text-muted-foreground">
-                <span className="flex items-center gap-2">
-                  <span className="size-2.5 rounded-sm bg-primary/85" />
-                  Total de pedidos
-                </span>
-                <span className="flex items-center gap-2">
-                  <span className="size-2.5 rounded-sm bg-warning" />
-                  Urgentes e críticos
-                </span>
+              <div className="mt-6">
+                <VolumeChart data={consultations} />
               </div>
             </section>
 
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Pendentes" value={metrics.pending} icon={Activity} tone="warning" />
-              <StatCard label="Agendadas" value={metrics.scheduled} icon={Activity} tone="primary" />
+            {/*
+              Cinco estados, cinco cartões: no protótipo testado faltava "Em
+              curso" e os totais apresentados somavam menos um pedido do que os
+              que existiam de facto.
+            */}
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+              <StatCard label="Pendentes" value={metrics.pending} icon={Inbox} tone="warning" />
+              <StatCard label="Agendadas" value={metrics.scheduled} icon={CalendarCheck2} tone="primary" />
+              <StatCard label="Em curso" value={metrics.inProgress} icon={Activity} tone="success" />
               <StatCard label="Concluídas" value={metrics.completed} icon={CheckCircle2} tone="success" />
               <StatCard label="Encaminhadas" value={metrics.referred} icon={ShieldOff} tone="danger" />
+            </section>
+
+            <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+              <h2 className="font-bold tracking-tight">Percurso dos pedidos</h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Os cinco estados somam sempre o total de pedidos registados.
+              </p>
+              <div className="mt-4">
+                <StageChart data={consultations} />
+              </div>
             </section>
 
             <section className="grid gap-4 sm:grid-cols-2">
@@ -582,8 +829,8 @@ export default function AdministracaoPage() {
                 <p className="mt-0.5 text-sm text-muted-foreground">
                   Classificação atribuída pela triagem automática.
                 </p>
-                <div className="mt-6">
-                  <BreakdownBars items={priorityBreakdown} />
+                <div className="mt-4">
+                  <PriorityChart data={consultations} />
                 </div>
               </div>
 
@@ -608,7 +855,10 @@ export default function AdministracaoPage() {
               {editing ? "Editar utilizador" : "Novo utilizador"}
             </DialogTitle>
             <DialogDescription>
-              Os perfis determinam o que cada pessoa vê na plataforma.
+              Os perfis determinam o que cada pessoa vê na plataforma. Nesta
+              pré-visualização sem servidor, as contas criadas ficam guardadas
+              neste navegador — noutro computador ou numa janela anónima, o
+              início de sessão não as encontra.
             </DialogDescription>
           </DialogHeader>
 
@@ -628,6 +878,9 @@ export default function AdministracaoPage() {
                 <Input
                   id="user-name"
                   name="user-name"
+                  required
+                  aria-required="true"
+                  minLength={3}
                   value={form.name}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, name: event.target.value }))
@@ -645,6 +898,8 @@ export default function AdministracaoPage() {
                   name="user-email"
                   type="email"
                   autoComplete="off"
+                  required
+                  aria-required="true"
                   value={form.email}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, email: event.target.value }))
@@ -662,6 +917,10 @@ export default function AdministracaoPage() {
                   name="user-password"
                   type="text"
                   autoComplete="off"
+                  required
+                  aria-required="true"
+                  minLength={6}
+                  placeholder="Mínimo 6 caracteres"
                   value={form.password}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -704,6 +963,9 @@ export default function AdministracaoPage() {
                   id="user-phone"
                   name="user-phone"
                   type="tel"
+                  required
+                  aria-required="true"
+                  placeholder="+258 84 000 0000"
                   value={form.phone}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, phone: event.target.value }))
@@ -721,6 +983,9 @@ export default function AdministracaoPage() {
                     <Input
                       id="user-specialty"
                       name="user-specialty"
+                      list="especialidades-hgm"
+                      required
+                      aria-required="true"
                       value={form.specialty}
                       onChange={(event) =>
                         setForm((current) => ({
@@ -730,6 +995,11 @@ export default function AdministracaoPage() {
                       }
                       className="mt-2 h-11 rounded-xl px-3.5"
                     />
+                    <datalist id="especialidades-hgm">
+                      {specialtySuggestions.map((option) => (
+                        <option key={option} value={option} />
+                      ))}
+                    </datalist>
                   </div>
 
                   <div>
@@ -739,6 +1009,9 @@ export default function AdministracaoPage() {
                     <Input
                       id="user-license"
                       name="user-license"
+                      required
+                      aria-required="true"
+                      placeholder="OM-0000"
                       value={form.licenseNumber}
                       onChange={(event) =>
                         setForm((current) => ({
@@ -748,6 +1021,53 @@ export default function AdministracaoPage() {
                       }
                       className="mt-2 h-11 rounded-xl px-3.5"
                     />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="user-shift" className="text-sm font-semibold">
+                      Turno de escala
+                    </Label>
+                    <Select
+                      value={form.shift}
+                      onValueChange={(value) =>
+                        setForm((current) => ({
+                          ...current,
+                          shift: value as Shift,
+                        }))
+                      }
+                    >
+                      <SelectTrigger id="user-shift" className="mt-2 h-11 w-full rounded-xl">
+                        <SelectValue placeholder="Seleccione o turno" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="MANHA">{shiftLabels.MANHA}</SelectItem>
+                        <SelectItem value="TARDE">{shiftLabels.TARDE}</SelectItem>
+                        <SelectItem value="NOITE">{shiftLabels.NOITE}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="user-available" className="text-sm font-semibold">
+                      Disponibilidade
+                    </Label>
+                    <Select
+                      value={form.available ? "SIM" : "NAO"}
+                      onValueChange={(value) =>
+                        setForm((current) => ({
+                          ...current,
+                          available: value === "SIM",
+                        }))
+                      }
+                    >
+                      <SelectTrigger id="user-available" className="mt-2 h-11 w-full rounded-xl">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="SIM">Disponível no turno</SelectItem>
+                        <SelectItem value="NAO">Fora de turno</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </>
               ) : null}

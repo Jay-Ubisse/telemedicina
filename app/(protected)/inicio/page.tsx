@@ -16,6 +16,11 @@ import {
   Users,
 } from "lucide-react";
 
+import {
+  PriorityChart,
+  StageChart,
+  VolumeChart,
+} from "@/components/dashboard/clinic-charts";
 import { NextConsultation } from "@/components/dashboard/next-consultation";
 import { PriorityQueue } from "@/components/dashboard/priority-queue";
 import { StatCard } from "@/components/dashboard/stat-card";
@@ -28,6 +33,7 @@ import { PriorityBadge } from "@/components/telemedicine/priority-badge";
 import { StatusBadge } from "@/components/telemedicine/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { accessLevelFor, maskConsultation } from "@/lib/auth/access";
 import { useClinicStore } from "@/lib/store/clinic-store";
 import { openStatuses } from "@/lib/types/consultation";
 import {
@@ -50,13 +56,21 @@ export default function InicioPage() {
           (item) => item.guardianId === user.id || item.phone === user.phone,
         )}
         childCount={
-          children.filter((child) => child.guardianId === user.id).length
+          children.filter(
+            (child) => child.guardianId === user.id && !child.archived,
+          ).length
         }
       />
     );
   }
 
-  return <ClinicalHome consultations={consultations} isAdmin={user.role === "ADMIN"} />;
+  // O painel clínico é uma vista de conjunto: os casos de outros pediatras
+  // entram nas contagens e nas filas, mas sem identificação nem contactos.
+  const scoped = consultations.map((item) =>
+    maskConsultation(item, accessLevelFor(user, item)),
+  );
+
+  return <ClinicalHome consultations={scoped} isAdmin={user.role === "ADMIN"} />;
 }
 
 // --- Painel do encarregado -------------------------------------------------
@@ -70,7 +84,7 @@ function GuardianHome({
 }) {
   const user = useSession();
   const children = useClinicStore((state) => state.children).filter(
-    (child) => child.guardianId === user.id,
+    (child) => child.guardianId === user.id && !child.archived,
   );
 
   const open = consultations.filter((item) => openStatuses.includes(item.status));
@@ -260,7 +274,7 @@ function GuardianHome({
               </span>
               <h3 className="mt-3.5 font-bold tracking-tight">Sem internet?</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-                Marque <span className="font-mono font-semibold text-foreground">*123#</span>{" "}
+                Marque <span className="font-ussd font-semibold text-foreground">*123#</span>{" "}
                 no seu telemóvel para submeter um pedido pelo canal USSD.
               </p>
               <Button asChild variant="outline" size="lg" className="mt-4 w-full">
@@ -349,6 +363,47 @@ function ClinicalHome({
             icon={Users}
             hint={`${metrics.todayUpcoming} ainda por realizar`}
           />
+        </section>
+
+        {/*
+          Leitura de conjunto antes das listas: como tem corrido a semana, o
+          que está à espera de decisão clínica e em que ponto do percurso estão
+          os pedidos. Os mesmos gráficos servem o pediatra e a administração.
+        */}
+        <section className="grid gap-4 xl:grid-cols-3">
+          <article className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8 xl:col-span-2">
+            <h2 className="font-bold tracking-tight">
+              Pedidos nos últimos 7 dias
+            </h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Altura da coluna é o total do dia; a base assinala os que
+              entraram como urgentes ou críticos.
+            </p>
+            <div className="mt-4">
+              <VolumeChart data={consultations} />
+            </div>
+          </article>
+
+          <article className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+            <h2 className="font-bold tracking-tight">Fila por gravidade</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Classificação atribuída pela triagem automática.
+            </p>
+            <div className="mt-4">
+              <PriorityChart data={consultations} />
+            </div>
+          </article>
+        </section>
+
+        <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+          <h2 className="font-bold tracking-tight">Percurso dos pedidos</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Do pedido recebido ao caso encerrado. A barra completa corresponde
+            ao total de pedidos registados.
+          </p>
+          <div className="mt-4">
+            <StageChart data={consultations} />
+          </div>
         </section>
 
         <section className="grid gap-6 xl:grid-cols-3">

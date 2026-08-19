@@ -15,17 +15,27 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatLocation } from "@/lib/data/locations";
 import type { Consultation } from "@/lib/types/consultation";
 import { describeAgeYears, formatDateTime, timeAgo } from "@/lib/utils/date";
 
-export function ConsultationsTable({ data }: { data: Consultation[] }) {
+export function ConsultationsTable({
+  data,
+  emptyDescription,
+}: {
+  data: Consultation[];
+  emptyDescription?: string;
+}) {
   if (data.length === 0) {
     return (
       <div className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
         <EmptyState
           icon={<SearchX className="size-5" />}
           title="Nenhuma teleconsulta encontrada"
-          description="Ajuste os filtros ou aguarde novos pedidos vindos do canal USSD e da web."
+          description={
+            emptyDescription ??
+            "Ajuste os filtros ou aguarde novos pedidos vindos do canal USSD e da web."
+          }
         />
       </div>
     );
@@ -41,7 +51,7 @@ export function ConsultationsTable({ data }: { data: Consultation[] }) {
               <TableHead>Criança</TableHead>
               <TableHead className="w-24">Idade</TableHead>
               <TableHead>Sintomas</TableHead>
-              <TableHead>Localização</TableHead>
+              <TableHead>Bairro</TableHead>
               <TableHead>Canal</TableHead>
               <TableHead>Prioridade</TableHead>
               <TableHead>Estado</TableHead>
@@ -54,7 +64,7 @@ export function ConsultationsTable({ data }: { data: Consultation[] }) {
             {data.map((item) => (
               <TableRow key={item.id}>
                 <TableCell>
-                  <span className="font-mono text-xs font-semibold">
+                  <span className="text-xs font-semibold">
                     {item.reference}
                   </span>
                   <Badge
@@ -88,7 +98,7 @@ export function ConsultationsTable({ data }: { data: Consultation[] }) {
                 </TableCell>
 
                 <TableCell className="max-w-[14rem] truncate text-muted-foreground">
-                  {item.location}
+                  {formatLocation(item.location)}
                 </TableCell>
 
                 <TableCell>

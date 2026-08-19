@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   Link2,
+  Loader2,
   Mic,
   MicOff,
   PhoneOff,
@@ -16,6 +17,7 @@ import { initialsOf } from "@/components/layout/nav-items";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useLocalMedia } from "@/lib/hooks/use-local-media";
 import { useClinicStore } from "@/lib/store/clinic-store";
 import type { Consultation } from "@/lib/types/consultation";
 import type { User } from "@/lib/types/user";
@@ -35,7 +37,15 @@ type Props = {
  * Correcções face ao protótipo testado:
  * - mostra sempre o pediatra atribuído a ESTE pedido, e não um nome fixo;
  * - o vídeo não arranca sozinho — é preciso entrar na sala explicitamente;
- * - "Encerrar" termina mesmo a chamada e devolve o controlo ao ecrã anterior.
+ * - "Encerrar" termina mesmo a chamada e devolve o controlo ao ecrã anterior;
+ * - um link expirado bloqueia a entrada, em vez de a anunciar e permitir na
+ *   mesma (era o caso do pedido R-1041 no relatório de testes).
+ *
+ * O par remoto é encenado — não há servidor de sinalização —, mas a
+ * auto-visualização usa a câmara real do dispositivo: ao entrar na sala, o
+ * navegador pede autorização e os controlos de microfone e câmara actuam sobre
+ * as pistas capturadas. Encerrar (ou sair do ecrã) liberta sempre o
+ * dispositivo.
  */
 export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
   const sendMessage = useClinicStore((state) => state.sendMessage);
@@ -48,6 +58,19 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const selfViewRef = useRef<HTMLVideoElement>(null);
+
+  const media = useLocalMedia();
+  const wantsVideo = consultation.channel === "VIDEO";
+  /** Só há imagem própria quando a captura correu bem e a câmara está ligada. */
+  const selfViewLive = joined && cameraOn && media.hasVideo && Boolean(media.stream);
+
+  // Ligar a captura ao elemento <video>. É sincronização com o DOM, não estado.
+  useEffect(() => {
+    const node = selfViewRef.current;
+    if (!node) return;
+    if (node.srcObject !== media.stream) node.srcObject = media.stream;
+  }, [media.stream, selfViewLive]);
 
   useEffect(() => {
     if (!joined) return;
@@ -63,6 +86,8 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
   const doctorName = consultation.assignedDoctorName ?? "Pediatra por atribuir";
   const remoteName = isDoctor ? consultation.guardianName : doctorName;
   const linkValid = isMeetingLinkValid(consultation);
+  // Só a videochamada depende do link; a chamada de voz não.
+  const blocked = consultation.channel === "VIDEO" && !linkValid;
 
   function handleSend(event: React.FormEvent) {
     event.preventDefault();
@@ -82,7 +107,34 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
     setDraft("");
   }
 
+  /**
+   * Entrar na sala pede a câmara e o microfone ao dispositivo. Se a
+   * autorização for negada — ou não houver câmara — a sala abre na mesma em
+   * modo encenado, com o motivo à vista.
+   */
+  async function handleJoin() {
+    const captured = await media.start({ video: wantsVideo });
+    setMicOn(true);
+    setCameraOn(wantsVideo && captured);
+    setElapsed(0);
+    setJoined(true);
+  }
+
+  function toggleMic() {
+    const next = !micOn;
+    setMicOn(next);
+    media.setTrackEnabled("audio", next);
+  }
+
+  function toggleCamera() {
+    const next = !cameraOn;
+    setCameraOn(next);
+    media.setTrackEnabled("video", next);
+  }
+
   function handleEnd() {
+    // Encerrar liberta mesmo a câmara e o microfone.
+    media.stop();
     setJoined(false);
     setElapsed(0);
     onEnded?.();
@@ -110,20 +162,55 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
                 </p>
               </div>
 
-              <Button
-                size="xl"
-                className="mt-1"
-                onClick={() => setJoined(true)}
-                disabled={consultation.status === "CONCLUIDA"}
-              >
-                <Video data-icon="inline-start" />
-                Entrar na sala
-              </Button>
+              {blocked ? (
+                <>
+                  <span className="mt-1 rounded-full bg-destructive/20 px-3 py-1.5 text-xs font-bold tracking-wide text-destructive uppercase">
+                    Link expirado
+                  </span>
+                  <p className="max-w-xs text-xs leading-relaxed text-white/60">
+                    A entrada nesta sala está bloqueada. O pediatra responsável
+                    tem de reenviar o link por SMS, o que gera um novo prazo de
+                    acesso.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Button
+                    size="xl"
+                    className="mt-1"
+                    onClick={handleJoin}
+                    disabled={
+                      consultation.status === "CONCLUIDA" ||
+                      media.status === "requesting"
+                    }
+                  >
+                    {media.status === "requesting" ? (
+                      <>
+                        <Loader2 data-icon="inline-start" className="animate-spin" />
+                        A pedir autorização…
+                      </>
+                    ) : (
+                      <>
+                        <Video data-icon="inline-start" />
+                        Entrar na sala
+                      </>
+                    )}
+                  </Button>
 
-              <p className="max-w-xs text-xs leading-relaxed text-white/45">
-                A ligação só é estabelecida depois de confirmar — nada arranca
-                automaticamente.
-              </p>
+                  <p className="max-w-xs text-xs leading-relaxed text-white/45">
+                    A ligação só é estabelecida depois de confirmar — nada
+                    arranca automaticamente. O navegador vai pedir autorização
+                    para usar {wantsVideo ? "a câmara e o microfone" : "o microfone"}{" "}
+                    deste dispositivo.
+                  </p>
+
+                  {media.message ? (
+                    <p className="max-w-sm rounded-lg bg-white/10 px-3 py-2 text-xs leading-relaxed text-white/70">
+                      {media.message}
+                    </p>
+                  ) : null}
+                </>
+              )}
             </div>
           ) : (
             <>
@@ -137,9 +224,20 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
                 </div>
               </div>
 
-              {/* Auto-visualização */}
+              {/* Auto-visualização: imagem real da câmara do dispositivo */}
               <div className="absolute right-4 bottom-4 flex size-24 items-center justify-center overflow-hidden rounded-xl bg-[oklch(28%_0.03_245)] ring-1 ring-white/15 sm:size-32">
-                {cameraOn ? (
+                {selfViewLive ? (
+                  <video
+                    ref={selfViewRef}
+                    autoPlay
+                    playsInline
+                    // Sem som próprio: evita realimentação do microfone.
+                    muted
+                    aria-label="A sua câmara"
+                    // Espelhado, como em qualquer auto-visualização.
+                    className="size-full -scale-x-100 object-cover"
+                  />
+                ) : cameraOn ? (
                   <span className="text-sm font-bold text-white/80">
                     {initialsOf(viewer.name)}
                   </span>
@@ -148,9 +246,15 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
                 )}
               </div>
 
+              {media.hasVideo ? (
+                <span className="absolute right-4 bottom-[6.75rem] rounded-md bg-black/50 px-1.5 py-0.5 text-[0.5625rem] tracking-[0.12em] text-white/70 font-semibold uppercase backdrop-blur sm:bottom-[8.75rem]">
+                  {cameraOn ? "Câmara ligada" : "Câmara desligada"}
+                </span>
+              ) : null}
+
               <div className="absolute top-4 left-4 flex items-center gap-2 rounded-full bg-black/45 px-3 py-1.5 backdrop-blur">
                 <span className="size-2 animate-pulse rounded-full bg-destructive" />
-                <span className="font-mono text-xs font-semibold text-white tabular-nums">
+                <span className="text-xs font-semibold text-white tabular-nums">
                   {minutes}:{seconds}
                 </span>
               </div>
@@ -164,8 +268,10 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
             variant="ghost"
             size="icon-lg"
             aria-label={micOn ? "Desligar microfone" : "Ligar microfone"}
-            onClick={() => setMicOn((value) => !value)}
-            disabled={!joined}
+            onClick={toggleMic}
+            // Sem captura não há nada para ligar ou desligar: o controlo fica
+            // inactivo em vez de fingir que actua sobre alguma coisa.
+            disabled={!joined || !media.hasAudio}
             className={cn(
               "rounded-full text-white hover:bg-white/10 hover:text-white",
               !micOn && "bg-destructive/25 text-destructive-foreground",
@@ -178,8 +284,8 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
             variant="ghost"
             size="icon-lg"
             aria-label={cameraOn ? "Desligar câmara" : "Ligar câmara"}
-            onClick={() => setCameraOn((value) => !value)}
-            disabled={!joined || consultation.channel !== "VIDEO"}
+            onClick={toggleCamera}
+            disabled={!joined || !wantsVideo || !media.hasVideo}
             className={cn(
               "rounded-full text-white hover:bg-white/10 hover:text-white",
               !cameraOn && "bg-destructive/25 text-destructive-foreground",
@@ -199,6 +305,27 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
             Encerrar
           </Button>
         </div>
+
+        {/* Estado do dispositivo: o que está mesmo ligado e o que é encenado. */}
+        {joined ? (
+          <div className="border-t border-white/10 px-4 py-3">
+            {media.message ? (
+              <p className="text-xs leading-relaxed text-white/60">
+                {media.message}
+              </p>
+            ) : (
+              <p className="text-xs leading-relaxed text-white/55">
+                {media.hasVideo
+                  ? `Câmara deste dispositivo${
+                      media.cameraLabel ? ` (${media.cameraLabel})` : ""
+                    } activa na auto-visualização.`
+                  : "Microfone deste dispositivo activo."}{" "}
+                A imagem não é transmitida — o outro participante é simulado.
+                Encerrar liberta a câmara e o microfone.
+              </p>
+            )}
+          </div>
+        ) : null}
       </div>
 
       {/* Chat */}
@@ -263,12 +390,12 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
             </Alert>
           ) : null}
 
-          {consultation.channel === "VIDEO" && !linkValid ? (
+          {blocked ? (
             <Alert variant="warning" className="mb-2">
               <Link2 />
               <AlertDescription>
-                O link da videochamada não está activo. O pediatra pode reenviá-lo
-                por SMS.
+                O link da videochamada expirou. O pediatra responsável pode
+                reenviá-lo por SMS para abrir um novo prazo de acesso.
               </AlertDescription>
             </Alert>
           ) : null}

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { FileHeart, Hospital, History, Search } from "lucide-react";
+import { FileHeart, Hospital, History, Lock, Search } from "lucide-react";
 
 import { StatCard } from "@/components/dashboard/stat-card";
 import { AppHeader } from "@/components/layout/app-header";
@@ -11,8 +11,10 @@ import { useSession } from "@/components/layout/session-provider";
 import { ChannelBadge } from "@/components/telemedicine/channel-badge";
 import { PriorityBadge } from "@/components/telemedicine/priority-badge";
 import { StatusBadge } from "@/components/telemedicine/status-badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { accessLevelFor, maskConsultation } from "@/lib/auth/access";
 import { useClinicStore } from "@/lib/store/clinic-store";
 import { sortByCreatedDesc } from "@/lib/utils/consultations";
 import { describeAgeYears, formatDateTime } from "@/lib/utils/date";
@@ -25,11 +27,17 @@ export default function HistoricoClinicoPage() {
   const isGuardian = user.role === "ENCARREGADO";
 
   const history = useMemo(() => {
-    const scoped = isGuardian
+    const owned = isGuardian
       ? consultations.filter(
           (item) => item.guardianId === user.id || item.phone === user.phone,
         )
       : consultations;
+
+    // O histórico segue as mesmas regras de visibilidade do resto da
+    // plataforma: notas clínicas só para quem acompanhou o caso.
+    const scoped = owned.map((item) =>
+      maskConsultation(item, accessLevelFor(user, item)),
+    );
 
     const closed = scoped.filter(
       (item) => item.status === "CONCLUIDA" || item.status === "ENCAMINHADA",
@@ -49,7 +57,7 @@ export default function HistoricoClinicoPage() {
           );
 
     return sortByCreatedDesc(filtered);
-  }, [consultations, isGuardian, user.id, user.phone, search]);
+  }, [consultations, isGuardian, user, search]);
 
   const completed = history.filter((item) => item.status === "CONCLUIDA").length;
   const referred = history.filter((item) => item.status === "ENCAMINHADA").length;
@@ -67,6 +75,18 @@ export default function HistoricoClinicoPage() {
       />
 
       <PageShell>
+        {!isGuardian ? (
+          <Alert variant="info">
+            <Lock />
+            <AlertTitle>Acesso ao conteúdo clínico</AlertTitle>
+            <AlertDescription>
+              {user.role === "ADMIN"
+                ? "O perfil de administração vê a actividade do serviço; as notas clínicas e a orientação pertencem ao processo do profissional que acompanhou o caso."
+                : "As notas clínicas e a orientação são apresentadas nas teleconsultas que acompanhou. Nos casos de colegas vê apenas o resumo, salvo acesso justificado no próprio pedido."}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
         <section className="grid gap-4 sm:grid-cols-3">
           <StatCard
             label="Total no histórico"
@@ -159,7 +179,8 @@ export default function HistoricoClinicoPage() {
                     <dd className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
                       {(item.status === "ENCAMINHADA"
                         ? item.referralReason
-                        : item.clinicalNotes) || "Sem registo."}
+                        : item.clinicalNotes) ||
+                        (isGuardian ? "Sem registo." : "Reservado ao processo clínico.")}
                     </dd>
                   </div>
 
@@ -168,7 +189,10 @@ export default function HistoricoClinicoPage() {
                       Orientação
                     </dt>
                     <dd className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-                      {item.guidance || "Sem orientação registada."}
+                      {item.guidance ||
+                        (isGuardian
+                          ? "Sem orientação registada."
+                          : "Reservado ao processo clínico.")}
                     </dd>
                   </div>
                 </dl>

@@ -41,15 +41,15 @@ export function SiteFooter() {
               Funciona em qualquer telemóvel, com ou sem internet.
             </p>
 
-            <p className="mt-6 font-mono text-[0.625rem] tracking-[0.14em] text-ink-muted uppercase">
+            <p className="mt-6 text-[0.625rem] tracking-[0.14em] text-ink-muted font-semibold uppercase">
               Emergência pediátrica
             </p>
-            <p className="mt-1 font-mono text-lg font-semibold">1420</p>
+            <p className="mt-1 text-lg font-semibold">1420</p>
           </div>
 
           {columns.map((column) => (
             <div key={column.title}>
-              <p className="font-mono text-[0.625rem] tracking-[0.16em] text-ink-muted uppercase">
+              <p className="text-[0.625rem] tracking-[0.16em] text-ink-muted font-semibold uppercase">
                 {column.title}
               </p>
               <ul className="mt-4 space-y-2.5">
@@ -72,7 +72,7 @@ export function SiteFooter() {
           <p className="text-xs text-ink-muted">
             © 2026 Hospital Geral de Mavalane. Protótipo institucional.
           </p>
-          <p className="font-mono text-[0.625rem] tracking-[0.14em] text-ink-muted uppercase">
+          <p className="text-[0.625rem] tracking-[0.14em] text-ink-muted font-semibold uppercase">
             FHIR R4 · HL7 v2 · WebRTC
           </p>
         </div>

@@ -1,6 +1,6 @@
 /**
  * Catálogo de sintomas e regras de triagem definidos em
- * `docs/Observações protótipo.docx`.
+ * `docs/relatorio.docx`.
  */
 
 /** Sintomas leves → prioridade normal → teleconsulta. */

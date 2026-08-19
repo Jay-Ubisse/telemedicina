@@ -12,14 +12,17 @@ import {
   seedUsers,
 } from "../data/seed";
 import type {
+  AccessLogEntry,
+  AccessReason,
   Attachment,
   AttachmentKind,
   ChatMessage,
   Consultation,
   ConsultationChannel,
+  ConsultationPriority,
 } from "../types/consultation";
-import { openStatuses } from "../types/consultation";
-import type { Child, User, UserRole } from "../types/user";
+import { closedStatuses, openStatuses } from "../types/consultation";
+import type { Child, Shift, User, UserRole } from "../types/user";
 import { ageInYears } from "../utils/date";
 import { triage, validateChildAge } from "../utils/triage";
 
@@ -69,6 +72,25 @@ export type ScheduleInput = {
   channel?: ConsultationChannel;
 };
 
+export type CompleteInput = {
+  clinicalNotes: string;
+  guidance: string;
+  /**
+   * Classificação final atribuída pelo pediatra. Um pedido que entrou como
+   * "Avaliação necessária" tem de sair da consulta com uma prioridade real —
+   * era o que ficava por resolver no protótipo anterior.
+   */
+  priority?: ConsultationPriority;
+};
+
+export type AttachmentInput = {
+  name: string;
+  kind: AttachmentKind;
+  mimeType?: string;
+  size?: number;
+  dataUrl?: string;
+};
+
 export type CreateUserInput = {
   name: string;
   email: string;
@@ -77,6 +99,8 @@ export type CreateUserInput = {
   phone: string;
   specialty?: string;
   licenseNumber?: string;
+  shift?: Shift;
+  available?: boolean;
   address?: string;
   idDocument?: string;
 };
@@ -102,6 +126,8 @@ type ClinicState = {
   ) => ActionResult<Child>;
   updateChild: (childId: string, patch: Partial<Child>) => ActionResult<Child>;
   removeChild: (childId: string) => ActionResult<undefined>;
+  archiveChild: (childId: string) => ActionResult<Child>;
+  restoreChild: (childId: string) => ActionResult<Child>;
 
   // --- pedidos ------------------------------------------------------------
   createConsultation: (
@@ -111,9 +137,13 @@ type ClinicState = {
   startConsultation: (id: string, doctorId: string) => ActionResult<Consultation>;
   completeConsultation: (
     id: string,
-    payload: { clinicalNotes: string; guidance: string },
+    payload: CompleteInput,
   ) => ActionResult<Consultation>;
-  referConsultation: (id: string, reason: string) => ActionResult<Consultation>;
+  referConsultation: (
+    id: string,
+    reason: string,
+    priority?: ConsultationPriority,
+  ) => ActionResult<Consultation>;
   cancelConsultation: (id: string) => ActionResult<undefined>;
   resendMeetingLink: (id: string) => ActionResult<Consultation>;
   sendMessage: (
@@ -122,13 +152,19 @@ type ClinicState = {
   ) => ActionResult<Consultation>;
   addAttachment: (
     id: string,
-    attachment: { name: string; kind: AttachmentKind },
+    attachment: AttachmentInput,
+  ) => ActionResult<Consultation>;
+  /** Regista um acesso excepcional ao processo clínico (auditoria). */
+  grantExceptionalAccess: (
+    id: string,
+    entry: { userId: string; userName: string; reason: AccessReason; note?: string },
   ) => ActionResult<Consultation>;
 
   // --- administração ------------------------------------------------------
   createUser: (input: CreateUserInput) => ActionResult<User>;
   updateUser: (userId: string, patch: Partial<User>) => ActionResult<User>;
   setUserActive: (userId: string, active: boolean) => ActionResult<User>;
+  removeUser: (userId: string) => ActionResult<undefined>;
 
   // --- demonstração -------------------------------------------------------
   syncDemoDay: () => void;
@@ -148,6 +184,12 @@ function makeId(prefix: string) {
 
 function buildMeetingLink(reference: string) {
   return `https://telemedicina.hgm.mz/sala/${reference}`;
+}
+
+/** Compara números de telemóvel ignorando espaços e indicativo. */
+function samePhone(a: string, b: string) {
+  const digits = (value: string) => value.replace(/\D/g, "").slice(-9);
+  return digits(a) !== "" && digits(a) === digits(b);
 }
 
 function initialState() {
@@ -172,7 +214,16 @@ export const useClinicStore = create<ClinicState>()(
           (item) => normalizeEmail(item.email) === normalizeEmail(email),
         );
 
-        if (!user) return fail("Não existe nenhuma conta com este email.");
+        if (!user) {
+          return fail(
+            "Não existe nenhuma conta com este email. Verifique o endereço ou crie uma conta.",
+          );
+        }
+        if (user.provisional || !user.password) {
+          return fail(
+            "Esta conta foi criada a partir de um pedido USSD e ainda não tem palavra-passe. Conclua o registo em «Criar conta» com o mesmo número de telemóvel.",
+          );
+        }
         if (user.password !== password) return fail("Palavra-passe incorrecta.");
         if (!user.active) {
           return fail("Esta conta está desactivada. Contacte a administração do HGM.");
@@ -192,11 +243,73 @@ export const useClinicStore = create<ClinicState>()(
         if (input.password.length < 6) {
           return fail("A palavra-passe deve ter pelo menos 6 caracteres.");
         }
+        if (!input.phone.trim()) return fail("Indique o número de telefone.");
         if (get().users.some((user) => normalizeEmail(user.email) === email)) {
           return fail("Já existe uma conta registada com este email.");
         }
 
         const now = new Date().toISOString();
+
+        // Um pedido USSD feito a partir de um número ainda não registado cria
+        // uma conta provisória. Quando essa família se regista na web com o
+        // mesmo número, a conta é assumida — em vez de duplicada — e as
+        // crianças e os pedidos já existentes passam a ser visíveis.
+        const provisional = get().users.find(
+          (item) =>
+            item.provisional && samePhone(item.phone, input.phone) && item.active,
+        );
+
+        if (provisional) {
+          const claimed: User = {
+            ...provisional,
+            name: input.name.trim(),
+            email,
+            password: input.password,
+            phone: input.phone.trim(),
+            idDocument: input.idDocument.trim(),
+            address: input.address.trim(),
+            provisional: false,
+          };
+
+          const extraChild: Child | null = input.child
+            ? {
+                id: makeId("CRI"),
+                guardianId: claimed.id,
+                name: input.child.name.trim(),
+                birthDate: input.child.birthDate,
+                sex: input.child.sex,
+                notes: input.child.notes?.trim() ?? "",
+                createdAt: now,
+              }
+            : null;
+
+          // Evita duplicar a criança que já tinha sido criada pelo USSD.
+          const alreadyRegistered = get().children.some(
+            (child) =>
+              child.guardianId === claimed.id &&
+              child.name.trim().toLowerCase() ===
+                (input.child?.name.trim().toLowerCase() ?? ""),
+          );
+
+          set((state) => ({
+            users: state.users.map((item) =>
+              item.id === claimed.id ? claimed : item,
+            ),
+            children:
+              extraChild && !alreadyRegistered
+                ? [...state.children, extraChild]
+                : state.children,
+            consultations: state.consultations.map((item) =>
+              item.guardianId === claimed.id
+                ? { ...item, guardianName: claimed.name }
+                : item,
+            ),
+            sessionUserId: claimed.id,
+          }));
+
+          return { ok: true, data: claimed };
+        }
+
         const user: User = {
           id: makeId("USR"),
           name: input.name.trim(),
@@ -235,12 +348,27 @@ export const useClinicStore = create<ClinicState>()(
         const user = get().users.find((item) => item.id === userId);
         if (!user) return fail("Utilizador não encontrado.");
 
+        if (patch.name !== undefined && patch.name.trim().length < 3) {
+          return fail("Indique o nome completo.");
+        }
+
         if (patch.email) {
           const email = normalizeEmail(patch.email);
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return fail("Indique um email válido.");
+          }
           const taken = get().users.some(
             (item) => item.id !== userId && normalizeEmail(item.email) === email,
           );
           if (taken) return fail("Esse email já está associado a outra conta.");
+        }
+
+        if (patch.password !== undefined && patch.password.length < 6) {
+          return fail("A palavra-passe deve ter pelo menos 6 caracteres.");
+        }
+
+        if (patch.phone !== undefined && patch.phone.replace(/\D/g, "").length < 9) {
+          return fail("Indique um número de telefone válido (9 dígitos).");
         }
 
         const updated: User = { ...user, ...patch, id: user.id };
@@ -307,12 +435,23 @@ export const useClinicStore = create<ClinicState>()(
         return { ok: true, data: updated };
       },
 
+      /**
+       * Eliminação definitiva só quando não existe qualquer pedido ou registo
+       * clínico associado. Havendo histórico, a criança é arquivada — nunca
+       * apagada — para preservar a informação clínica.
+       */
       removeChild: (childId) => {
-        const hasOpenRequest = get().consultations.some(
-          (item) => item.childId === childId && openStatuses.includes(item.status),
+        const history = get().consultations.filter(
+          (item) => item.childId === childId,
         );
-        if (hasOpenRequest) {
-          return fail("Não é possível remover: existe um pedido em aberto para esta criança.");
+
+        if (history.length > 0) {
+          const open = history.some((item) => openStatuses.includes(item.status));
+          return fail(
+            open
+              ? "Não é possível eliminar: existe um pedido em aberto para esta criança. Aguarde o encerramento ou arquive o registo."
+              : `Não é possível eliminar: existem ${history.length} pedido(s) no histórico clínico desta criança. Utilize «Arquivar» para preservar a informação.`,
+          );
         }
 
         set((state) => ({
@@ -320,6 +459,53 @@ export const useClinicStore = create<ClinicState>()(
         }));
 
         return { ok: true, data: undefined };
+      },
+
+      archiveChild: (childId) => {
+        const child = get().children.find((item) => item.id === childId);
+        if (!child) return fail("Criança não encontrada.");
+
+        const hasOpenRequest = get().consultations.some(
+          (item) => item.childId === childId && openStatuses.includes(item.status),
+        );
+        if (hasOpenRequest) {
+          return fail(
+            "Existe um pedido em aberto para esta criança. Aguarde o encerramento antes de arquivar.",
+          );
+        }
+
+        const updated: Child = {
+          ...child,
+          archived: true,
+          archivedAt: new Date().toISOString(),
+        };
+
+        set((state) => ({
+          children: state.children.map((item) =>
+            item.id === childId ? updated : item,
+          ),
+        }));
+
+        return { ok: true, data: updated };
+      },
+
+      restoreChild: (childId) => {
+        const child = get().children.find((item) => item.id === childId);
+        if (!child) return fail("Criança não encontrada.");
+
+        const updated: Child = {
+          ...child,
+          archived: false,
+          archivedAt: undefined,
+        };
+
+        set((state) => ({
+          children: state.children.map((item) =>
+            item.id === childId ? updated : item,
+          ),
+        }));
+
+        return { ok: true, data: updated };
       },
 
       // --- pedidos --------------------------------------------------------
@@ -356,9 +542,8 @@ export const useClinicStore = create<ClinicState>()(
           // combinação nome + telefone, nunca só pelo telefone — o mesmo
           // número pertence ao encarregado de vários educandos.
           return (
-            item.childId === "" &&
-            item.phone === input.phone.trim() &&
-            item.childName.toLowerCase() === childName.trim().toLowerCase()
+            samePhone(item.phone, input.phone) &&
+            item.childName.trim().toLowerCase() === childName.trim().toLowerCase()
           );
         });
         if (openForChild) {
@@ -372,22 +557,78 @@ export const useClinicStore = create<ClinicState>()(
           otherSymptom: input.otherSymptom,
         });
 
-        const guardian = input.guardianId
+        const reference = `R-${state.nextReference}`;
+        const now = new Date().toISOString();
+
+        let guardian = input.guardianId
           ? state.users.find((item) => item.id === input.guardianId)
           : undefined;
 
-        const reference = `R-${state.nextReference}`;
-        const now = new Date().toISOString();
+        // Um número ainda não registado também tem um encarregado do outro
+        // lado da linha: cria-se uma conta provisória e a criança fica desde
+        // logo ligada a essa pessoa, em vez de ficar um pedido órfão.
+        if (!guardian) {
+          guardian = state.users.find(
+            (item) =>
+              item.role === "ENCARREGADO" && samePhone(item.phone, input.phone),
+          );
+        }
+
+        const createdUsers: User[] = [];
+        const createdChildren: Child[] = [];
+
+        if (!guardian) {
+          guardian = {
+            id: makeId("USR"),
+            name: input.fallbackGuardianName?.trim() || "Encarregado (USSD)",
+            // Email técnico: a conta ainda não tem acesso à web.
+            email: `ussd-${input.phone.replace(/\D/g, "")}@pendente.hgm.mz`,
+            password: "",
+            role: "ENCARREGADO",
+            phone: input.phone.trim(),
+            address: input.location.trim(),
+            active: true,
+            createdAt: now,
+            provisional: true,
+          };
+          createdUsers.push(guardian);
+        }
+
+        let linkedChild = child;
+
+        if (!linkedChild) {
+          linkedChild = state.children.find(
+            (item) =>
+              item.guardianId === guardian!.id &&
+              item.name.trim().toLowerCase() === childName.trim().toLowerCase(),
+          );
+        }
+
+        if (!linkedChild) {
+          const birthYear = new Date().getFullYear() - Math.max(childAge, 0);
+          linkedChild = {
+            id: makeId("CRI"),
+            guardianId: guardian.id,
+            name: childName.trim(),
+            // Sem data exacta no USSD: assume-se 1 de Janeiro do ano estimado.
+            birthDate: `${birthYear}-01-01`,
+            sex: "M",
+            notes:
+              "Registada automaticamente a partir de um pedido USSD — confirmar data de nascimento e sexo no registo web.",
+            createdAt: now,
+          };
+          createdChildren.push(linkedChild);
+        }
 
         const consultation: Consultation = {
           id: makeId("TC"),
           reference,
-          childId: child?.id ?? "",
+          childId: linkedChild.id,
           childName: childName.trim(),
           childAgeYears: childAge,
-          guardianId: guardian?.id ?? null,
-          guardianName: guardian?.name ?? input.fallbackGuardianName ?? "Encarregado",
-          phone: input.phone.trim() || (guardian?.phone ?? ""),
+          guardianId: guardian.id,
+          guardianName: guardian.name,
+          phone: input.phone.trim() || guardian.phone,
           location: input.location.trim(),
           symptoms: input.symptoms,
           otherSymptom: input.otherSymptom?.trim() ?? "",
@@ -410,10 +651,19 @@ export const useClinicStore = create<ClinicState>()(
             : "",
           attachments: [],
           messages: [],
+          accessLog: [],
           closedAt: result.isEmergency ? now : null,
         };
 
         set((current) => ({
+          users:
+            createdUsers.length > 0
+              ? [...current.users, ...createdUsers]
+              : current.users,
+          children:
+            createdChildren.length > 0
+              ? [...current.children, ...createdChildren]
+              : current.children,
           consultations: [consultation, ...current.consultations],
           nextReference: current.nextReference + 1,
         }));
@@ -433,8 +683,19 @@ export const useClinicStore = create<ClinicState>()(
         const consultation = state.consultations.find((item) => item.id === id);
         if (!consultation) return fail("Pedido não encontrado.");
         if (!input.scheduledAt) return fail("Escolha a data e a hora da teleconsulta.");
-        if (new Date(input.scheduledAt).getFullYear() < 2026) {
-          return fail("A teleconsulta só pode ser agendada a partir de 2026.");
+
+        const when = new Date(input.scheduledAt);
+        if (Number.isNaN(when.getTime())) {
+          return fail("Data e hora inválidas.");
+        }
+        // Uma teleconsulta nunca pode ser marcada para um momento que já passou.
+        if (when.getTime() < Date.now() - 60_000) {
+          return fail(
+            "A data e hora indicadas já passaram. Escolha um horário futuro para a teleconsulta.",
+          );
+        }
+        if (when.getTime() > Date.now() + 180 * 86_400_000) {
+          return fail("O agendamento não pode ultrapassar 180 dias.");
         }
 
         const doctor = state.users.find((item) => item.id === input.doctorId);
@@ -501,10 +762,19 @@ export const useClinicStore = create<ClinicState>()(
         if (!payload.guidance.trim()) {
           return fail("Registe a orientação clínica antes de encerrar.");
         }
+        // "Avaliação necessária" é um estado de espera pela leitura de um
+        // profissional. Depois do parecer, o pedido tem de sair com uma
+        // classificação clínica real.
+        if (consultation.priority === "AVALIACAO" && !payload.priority) {
+          return fail(
+            "Classifique a gravidade do caso (normal, urgente ou crítica) antes de concluir — o estado «Avaliação necessária» não pode ficar por resolver.",
+          );
+        }
 
         const updated: Consultation = {
           ...consultation,
           status: "CONCLUIDA",
+          priority: payload.priority ?? consultation.priority,
           clinicalNotes: payload.clinicalNotes.trim(),
           guidance: payload.guidance.trim(),
           closedAt: new Date().toISOString(),
@@ -521,7 +791,7 @@ export const useClinicStore = create<ClinicState>()(
         return { ok: true, data: updated };
       },
 
-      referConsultation: (id, reason) => {
+      referConsultation: (id, reason, priority) => {
         const consultation = get().consultations.find((item) => item.id === id);
         if (!consultation) return fail("Pedido não encontrado.");
         if (!reason.trim()) return fail("Indique o motivo do encaminhamento.");
@@ -529,6 +799,13 @@ export const useClinicStore = create<ClinicState>()(
         const updated: Consultation = {
           ...consultation,
           status: "ENCAMINHADA",
+          // Um encaminhamento é sempre a leitura de um profissional: deixa de
+          // fazer sentido manter "Avaliação necessária".
+          priority:
+            priority ??
+            (consultation.priority === "AVALIACAO"
+              ? "URGENTE"
+              : consultation.priority),
           referralReason: reason.trim(),
           closedAt: new Date().toISOString(),
           meetingLinkExpiresAt: new Date().toISOString(),
@@ -567,12 +844,23 @@ export const useClinicStore = create<ClinicState>()(
           return fail("Agende a teleconsulta antes de enviar o link.");
         }
 
+        if (closedStatuses.includes(consultation.status)) {
+          return fail(
+            "Esta teleconsulta já foi encerrada — o link deixou de ser válido e não pode ser reenviado.",
+          );
+        }
+
+        // O prazo original conta a partir da hora marcada. Se essa hora já
+        // passou, o reenvio abre uma nova janela a contar de agora — era o
+        // que faltava no protótipo testado (R-1041).
+        const scheduled = new Date(consultation.scheduledAt).getTime();
+        const base = Math.max(scheduled, Date.now());
+
         const updated: Consultation = {
           ...consultation,
           meetingLink: buildMeetingLink(consultation.reference),
           meetingLinkExpiresAt: new Date(
-            new Date(consultation.scheduledAt).getTime() +
-              MEETING_LINK_GRACE_MINUTES * 60_000,
+            base + MEETING_LINK_GRACE_MINUTES * 60_000,
           ).toISOString(),
           smsSentAt: new Date().toISOString(),
         };
@@ -622,11 +910,41 @@ export const useClinicStore = create<ClinicState>()(
           name: attachment.name.trim(),
           kind: attachment.kind,
           addedAt: new Date().toISOString(),
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+          dataUrl: attachment.dataUrl,
         };
 
         const updated: Consultation = {
           ...consultation,
           attachments: [...consultation.attachments, entry],
+        };
+
+        set((current) => ({
+          consultations: current.consultations.map((item) =>
+            item.id === id ? updated : item,
+          ),
+        }));
+
+        return { ok: true, data: updated };
+      },
+
+      grantExceptionalAccess: (id, entry) => {
+        const consultation = get().consultations.find((item) => item.id === id);
+        if (!consultation) return fail("Pedido não encontrado.");
+
+        const log: AccessLogEntry = {
+          id: makeId("LOG"),
+          userId: entry.userId,
+          userName: entry.userName,
+          reason: entry.reason,
+          note: entry.note?.trim() ?? "",
+          at: new Date().toISOString(),
+        };
+
+        const updated: Consultation = {
+          ...consultation,
+          accessLog: [...(consultation.accessLog ?? []), log],
         };
 
         set((current) => ({
@@ -647,8 +965,25 @@ export const useClinicStore = create<ClinicState>()(
         if (input.password.length < 6) {
           return fail("A palavra-passe deve ter pelo menos 6 caracteres.");
         }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          return fail("Indique um email válido (ex.: nome@hgm.mz).");
+        }
+        if (input.phone.replace(/\D/g, "").length < 9) {
+          return fail("Indique um número de telefone válido (9 dígitos).");
+        }
         if (get().users.some((user) => normalizeEmail(user.email) === email)) {
           return fail("Já existe um utilizador com este email.");
+        }
+        if (input.role === "PEDIATRA") {
+          if (!input.specialty?.trim()) {
+            return fail("Indique a especialidade do pediatra.");
+          }
+          if (!input.licenseNumber?.trim()) {
+            return fail("Indique o número da Ordem dos Médicos.");
+          }
+          if (!input.shift) {
+            return fail("Indique o turno de escala do pediatra.");
+          }
         }
 
         const user: User = {
@@ -660,6 +995,8 @@ export const useClinicStore = create<ClinicState>()(
           phone: input.phone.trim(),
           specialty: input.specialty?.trim(),
           licenseNumber: input.licenseNumber?.trim(),
+          shift: input.role === "PEDIATRA" ? input.shift : undefined,
+          available: input.role === "PEDIATRA" ? (input.available ?? true) : undefined,
           address: input.address?.trim(),
           idDocument: input.idDocument?.trim(),
           active: true,
@@ -688,6 +1025,41 @@ export const useClinicStore = create<ClinicState>()(
         return { ok: true, data: updated };
       },
 
+      /**
+       * Eliminação administrativa só para contas sem qualquer actividade no
+       * sistema. Um pediatra com consultas registadas ou um encarregado com
+       * pedidos nunca são apagados — apenas desactivados.
+       */
+      removeUser: (userId) => {
+        const state = get();
+        const user = state.users.find((item) => item.id === userId);
+        if (!user) return fail("Utilizador não encontrado.");
+        if (state.sessionUserId === userId) {
+          return fail("Não pode eliminar a conta com que está autenticado.");
+        }
+
+        const hasConsultations = state.consultations.some(
+          (item) => item.assignedDoctorId === userId || item.guardianId === userId,
+        );
+        const hasChildren = state.children.some(
+          (item) => item.guardianId === userId,
+        );
+
+        if (hasConsultations || hasChildren) {
+          return fail(
+            user.role === "PEDIATRA"
+              ? "Este pediatra tem teleconsultas registadas. A identificação e o histórico têm de ser preservados — desactive a conta em vez de a eliminar."
+              : "Este utilizador tem crianças ou pedidos associados. Desactive a conta para preservar o histórico clínico.",
+          );
+        }
+
+        set((current) => ({
+          users: current.users.filter((item) => item.id !== userId),
+        }));
+
+        return { ok: true, data: undefined };
+      },
+
       // --- demonstração ---------------------------------------------------
       syncDemoDay: () => {
         const state = get();
@@ -713,7 +1085,11 @@ export const useClinicStore = create<ClinicState>()(
     }),
     {
       name: "hgm-telepediatria",
-      version: 2,
+      // v3: pedidos ligados sempre a um encarregado, registo de auditoria,
+      // turnos dos pediatras e arquivo de crianças. Estados anteriores são
+      // descartados por não terem estes campos.
+      version: 3,
+      migrate: () => initialState(),
       partialize: (state) => ({
         users: state.users,
         children: state.children,
@@ -739,6 +1115,9 @@ function pickUserEdits(consultation: Consultation): Partial<Consultation> {
   if (consultation.messages.length > 0) edits.messages = consultation.messages;
   if (consultation.attachments.length > 0) {
     edits.attachments = consultation.attachments;
+  }
+  if (consultation.accessLog?.length > 0) {
+    edits.accessLog = consultation.accessLog;
   }
 
   return edits;

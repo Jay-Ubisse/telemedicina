@@ -32,11 +32,11 @@ export function SiteHeader() {
           esta página pode dar a quem chega de um telemóvel simples. */}
       <div className="bg-ink text-ink-foreground">
         <div className="mx-auto flex w-full max-w-[86rem] items-center justify-between gap-4 px-5 py-2 sm:px-8">
-          <p className="font-mono text-[0.625rem] tracking-[0.14em] uppercase">
+          <p className="text-[0.625rem] tracking-[0.14em] font-semibold uppercase">
             Sem internet? Marque{" "}
-            <span className="font-semibold text-primary">*123#</span>
+            <span className="font-ussd font-semibold text-primary">*123#</span>
           </p>
-          <p className="hidden font-mono text-[0.625rem] tracking-[0.14em] text-ink-muted uppercase sm:block">
+          <p className="hidden text-[0.625rem] tracking-[0.14em] text-ink-muted font-semibold uppercase sm:block">
             Hospital Geral de Mavalane · Maputo
           </p>
         </div>
@@ -58,7 +58,7 @@ export function SiteHeader() {
               <a
                 key={item.href}
                 href={item.href}
-                className="font-mono text-[0.6875rem] tracking-[0.12em] text-muted-foreground uppercase transition-colors hover:text-foreground"
+                className="text-[0.6875rem] tracking-[0.12em] text-muted-foreground font-semibold uppercase transition-colors hover:text-foreground"
               >
                 {item.label}
               </a>
@@ -95,7 +95,7 @@ export function SiteHeader() {
                   key={item.href}
                   href={item.href}
                   onClick={() => setOpen(false)}
-                  className="border-b border-border/60 py-3.5 font-mono text-[0.6875rem] tracking-[0.12em] text-muted-foreground uppercase last:border-0 hover:text-foreground"
+                  className="border-b border-border/60 py-3.5 text-[0.6875rem] tracking-[0.12em] text-muted-foreground font-semibold uppercase last:border-0 hover:text-foreground"
                 >
                   {item.label}
                 </a>
@@ -103,7 +103,7 @@ export function SiteHeader() {
               <Link
                 href="/login"
                 onClick={() => setOpen(false)}
-                className="border-t border-border py-3.5 font-mono text-[0.6875rem] tracking-[0.12em] text-primary uppercase sm:hidden"
+                className="border-t border-border py-3.5 text-[0.6875rem] tracking-[0.12em] text-primary font-semibold uppercase sm:hidden"
               >
                 Entrar
               </Link>

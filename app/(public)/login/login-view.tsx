@@ -102,10 +102,10 @@ export function LoginView() {
       title="Aceda ao seu painel."
       description="Use as suas credenciais. Se está a experimentar o protótipo, escolha um perfil de demonstração."
       aside={
-        <p className="text-center font-mono text-[0.625rem] tracking-[0.14em] text-ink-muted uppercase">
+        <p className="text-center text-[0.625rem] tracking-[0.14em] text-ink-muted font-semibold uppercase">
           <Smartphone className="mr-1.5 inline size-3" />
           Sem internet? Marque{" "}
-          <span className="text-primary">*123#</span> ou{" "}
+          <span className="font-ussd text-primary">*123#</span> ou{" "}
           <Link
             href="/ussd"
             className="text-ink-foreground underline underline-offset-4 hover:text-primary"
@@ -116,7 +116,7 @@ export function LoginView() {
       }
     >
       <fieldset>
-        <legend className="font-mono text-[0.625rem] tracking-[0.16em] text-muted-foreground uppercase">
+        <legend className="text-[0.625rem] tracking-[0.16em] text-muted-foreground font-semibold uppercase">
           Perfis de demonstração
         </legend>
 
@@ -160,17 +160,26 @@ export function LoginView() {
 
       <div className="my-6 flex items-center gap-3">
         <span className="h-px flex-1 bg-border" />
-        <span className="font-mono text-[0.5625rem] tracking-[0.16em] text-muted-foreground uppercase">
+        <span className="text-[0.5625rem] tracking-[0.16em] text-muted-foreground font-semibold uppercase">
           ou entre com a sua conta
         </span>
         <span className="h-px flex-1 bg-border" />
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+      <form onSubmit={handleSubmit} className="space-y-4">
         {error ? (
           <Alert variant="destructive">
             <AlertCircle />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>
+              {error}
+              {error.startsWith("Não existe nenhuma conta") ? (
+                <>
+                  {" "}
+                  Nesta pré-visualização sem servidor, as contas criadas ficam
+                  guardadas apenas no navegador onde foram criadas.
+                </>
+              ) : null}
+            </AlertDescription>
           </Alert>
         ) : null}
 
