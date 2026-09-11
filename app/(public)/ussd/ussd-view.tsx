@@ -11,8 +11,9 @@ import {
   Smartphone,
 } from "lucide-react";
 
+import { EmergencyNotice } from "@/components/layout/emergency-notice";
 import { UssdDevice, UssdDialog } from "@/components/ussd/ussd-device";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,20 +24,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { maputoNeighbourhoods } from "@/lib/data/locations";
+import { maputoNeighbourhoods, normalizeNeighbourhood } from "@/lib/data/locations";
 import { MAX_AGE_YEARS, ussdSymptomMenu } from "@/lib/data/symptoms";
 import { useClinicStore } from "@/lib/store/clinic-store";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
+import type { Consultation } from "@/lib/types/consultation";
 import {
   channelLabels,
-  closedStatuses,
-  priorityLabels,
+  shortStatusLabels,
   statusLabels,
 } from "@/lib/types/consultation";
 import type { ConsultationChannel } from "@/lib/types/consultation";
-import { isMeetingLinkValid } from "@/lib/utils/consultations";
-import { formatDateTime, formatTime } from "@/lib/utils/date";
-import { validateChildAge } from "@/lib/utils/triage";
+import { formatDateTime } from "@/lib/utils/date";
+import { screenIntake, validateChildAge } from "@/lib/utils/intake";
 
 type Step =
   | "MENU"
@@ -44,11 +44,13 @@ type Step =
   | "NOME"
   | "IDADE"
   | "LOCALIZACAO"
+  | "OUTRO_BAIRRO"
   | "SINTOMA"
   | "OUTRO_SINTOMA"
   | "CANAL"
   | "OBSERVACOES"
   | "CONFIRMACAO"
+  | "CORRIGIR"
   | "RESULTADO"
   | "PEDIDOS"
   | "FIM";
@@ -75,17 +77,22 @@ const emptyDraft: Draft = {
   notes: "",
 };
 
-const SYMPTOMS_PER_PAGE = 6;
-const OTHER_KEY = String(ussdSymptomMenu.length);
-/** Convenção USSD para paginação; não colide com nenhum número de sintoma. */
+const ITEMS_PER_PAGE = 6;
+
+/** Convenção USSD para paginação; não colide com nenhum número de opção. */
 const NEXT_PAGE_KEY = "99";
+/** Regresso ao início de uma lista paginada, oferecido na última página. */
+const FIRST_PAGE_KEY = "98";
+
+const OTHER_SYMPTOM_KEY = String(ussdSymptomMenu.length);
 
 /** Números "de SIM" pré-configurados no simulador. */
 const simCards = [
   { phone: "+258 84 512 3390", label: "Ana Mondlane" },
   { phone: "+258 82 771 4408", label: "Carla Nhaca" },
   { phone: "+258 86 330 9812", label: "Paulo Cossa" },
-  { phone: "+258 84 777 1200", label: "Número não registado" },
+  { phone: "+258 84 777 1200", label: "Rosa Macamo (conta provisória)" },
+  { phone: "+258 84 555 0101", label: "Número não registado" },
 ];
 
 const OTHER_SIM = "OUTRO";
@@ -93,17 +100,35 @@ const OTHER_SIM = "OUTRO";
 /**
  * Menu de localização.
  *
- * O passo anterior era um campo de texto livre, onde entravam ruas e números
- * de porta. Um pedido de teleconsulta não precisa da morada exacta da criança:
- * o bairro chega para organizar o atendimento e é o que a política de
- * privacidade permite mostrar.
+ * O bairro chega para organizar o atendimento — não se recolhe rua nem número de
+ * porta. A lista deixou de ser fechada: a última opção é «Outro bairro», que
+ * abre um campo de texto, como o relatório pede em §6.
  */
-const locationMenu = maputoNeighbourhoods.map((label, index) => ({
-  key: String(index + 1),
-  label,
-}));
+const OTHER_LOCATION_KEY = String(maputoNeighbourhoods.length + 1);
 
-const LOCATIONS_PER_PAGE = 6;
+const locationMenu = [
+  ...maputoNeighbourhoods.map((label, index) => ({
+    key: String(index + 1),
+    label,
+  })),
+  { key: OTHER_LOCATION_KEY, label: "Outro bairro" },
+];
+
+const channelMenu: { key: string; value: ConsultationChannel; label: string }[] = [
+  { key: "1", value: "TEXTO", label: "Mensagens de texto" },
+  { key: "2", value: "AUDIO", label: "Chamada de áudio" },
+  { key: "3", value: "VIDEO", label: "Videochamada" },
+];
+
+/** Campos que a opção «Corrigir dados» permite alterar directamente. */
+const correctableFields: { key: string; label: string; step: Step }[] = [
+  { key: "1", label: "Nome completo da criança", step: "NOME" },
+  { key: "2", label: "Idade da criança", step: "IDADE" },
+  { key: "3", label: "Bairro", step: "LOCALIZACAO" },
+  { key: "4", label: "Sintoma principal", step: "SINTOMA" },
+  { key: "5", label: "Modalidade de atendimento", step: "CANAL" },
+  { key: "6", label: "Observações", step: "OBSERVACOES" },
+];
 
 /** Últimos 9 dígitos — compara números escritos em formatos diferentes. */
 function phoneKey(value: string) {
@@ -116,6 +141,10 @@ function normalizePhone(value: string) {
   if (digits.length < 9) return "";
   const local = digits.slice(-9);
   return `+258 ${local.slice(0, 2)} ${local.slice(2, 5)} ${local.slice(5)}`;
+}
+
+function paginate<T>(items: T[], page: number) {
+  return items.slice(page * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE + ITEMS_PER_PAGE);
 }
 
 export function UssdView() {
@@ -136,21 +165,24 @@ export function UssdView() {
   const [error, setError] = useState<string | null>(null);
   const [symptomPage, setSymptomPage] = useState(0);
   const [locationPage, setLocationPage] = useState(0);
+  /**
+   * Quando o utilizador corrige um campo a partir da confirmação, é para a
+   * confirmação que regressa — e não para o passo seguinte do formulário.
+   */
+  const [returnTo, setReturnTo] = useState<Step | null>(null);
   const [result, setResult] = useState<{
     message: string;
     reference: string;
     status: string;
-    priority: string;
-    isEmergency: boolean;
+    warning: string | null;
   } | null>(null);
 
   /**
-   * O número é capturado automaticamente pela rede — o utilizador nunca o
-   * digita no menu USSD. No simulador é possível escolher um dos cartões
+   * O número é capturado automaticamente pela rede — o utilizador nunca o digita
+   * no menu USSD. No simulador é possível escolher um dos cartões
    * pré-configurados ou introduzir qualquer outro número.
    */
-  const capturedPhone =
-    sim === OTHER_SIM ? normalizePhone(customPhone) : sim;
+  const capturedPhone = sim === OTHER_SIM ? normalizePhone(customPhone) : sim;
 
   const guardian = useMemo(
     () =>
@@ -179,8 +211,21 @@ export function UssdView() {
     [consultations, capturedPhone],
   );
 
+  /**
+   * Entrar num passo reinicia a paginação da lista desse passo.
+   *
+   * Era esta a correcção pedida em §6: ao regressar da idade da criança para o
+   * bairro, o menu reaparecia na página onde tinha ficado e a numeração começava
+   * em 13, como se faltassem as primeiras opções.
+   */
+  function resetPagesFor(next: Step) {
+    if (next === "LOCALIZACAO") setLocationPage(0);
+    if (next === "SINTOMA") setSymptomPage(0);
+  }
+
   function goTo(next: Step) {
     setHistory((stack) => [...stack, step]);
+    resetPagesFor(next);
     setStep(next);
     setInput("");
     setError(null);
@@ -193,10 +238,13 @@ export function UssdView() {
 
     setHistory((stack) => {
       if (stack.length === 0) {
+        resetPagesFor("MENU");
         setStep("MENU");
         return [];
       }
-      setStep(stack[stack.length - 1]);
+      const previous = stack[stack.length - 1];
+      resetPagesFor(previous);
+      setStep(previous);
       return stack.slice(0, -1);
     });
   }
@@ -209,26 +257,56 @@ export function UssdView() {
     setSymptomPage(0);
     setLocationPage(0);
     setHistory([]);
+    setReturnTo(null);
     setStep("MENU");
   }
 
-  const symptomPages = Math.ceil(ussdSymptomMenu.length / SYMPTOMS_PER_PAGE);
-  const visibleSymptoms = ussdSymptomMenu.slice(
-    symptomPage * SYMPTOMS_PER_PAGE,
-    symptomPage * SYMPTOMS_PER_PAGE + SYMPTOMS_PER_PAGE,
-  );
+  /**
+   * Avança para o passo seguinte — ou regressa à confirmação, se o utilizador
+   * estiver apenas a corrigir um campo.
+   */
+  function advance(next: Step) {
+    if (returnTo) {
+      const target = returnTo;
+      setReturnTo(null);
+      setHistory([]);
+      setStep(target);
+      setInput("");
+      setError(null);
+      return;
+    }
+    goTo(next);
+  }
 
-  const locationPages = Math.ceil(locationMenu.length / LOCATIONS_PER_PAGE);
-  const visibleLocations = locationMenu.slice(
-    locationPage * LOCATIONS_PER_PAGE,
-    locationPage * LOCATIONS_PER_PAGE + LOCATIONS_PER_PAGE,
-  );
+  const symptomPages = Math.ceil(ussdSymptomMenu.length / ITEMS_PER_PAGE);
+  const locationPages = Math.ceil(locationMenu.length / ITEMS_PER_PAGE);
+
+  const visibleSymptoms = paginate(ussdSymptomMenu, symptomPage);
+  const visibleLocations = paginate(locationMenu, locationPage);
+
+  /** Há página seguinte? Só então se oferece «99. Mais opções». */
+  const hasNextSymptomPage = symptomPage < symptomPages - 1;
+  const hasNextLocationPage = locationPage < locationPages - 1;
 
   function submit() {
     const value = input.trim();
 
     // "0" é universal: volta ao menu anterior (excepto no menu inicial).
-    if (value === "0" && step !== "MENU" && step !== "RESULTADO") {
+    if (
+      value === "0" &&
+      step !== "MENU" &&
+      step !== "RESULTADO" &&
+      step !== "PEDIDOS"
+    ) {
+      if (returnTo) {
+        const target = returnTo;
+        setReturnTo(null);
+        setHistory([]);
+        setStep(target);
+        setInput("");
+        setError(null);
+        return;
+      }
       goBack();
       return;
     }
@@ -241,7 +319,7 @@ export function UssdView() {
       // criança fique desde logo associada a uma pessoa e não a um número.
       if (value === "1") return goTo(guardian ? "NOME" : "ENCARREGADO");
       if (value === "2") return goTo("PEDIDOS");
-      if (value === "3" || value === "0") return setStep("FIM");
+      if (value === "3") return setStep("FIM");
       return setError("Opção inválida.");
     }
 
@@ -256,44 +334,91 @@ export function UssdView() {
     if (step === "NOME") {
       if (value.length < 3) return setError("Digite o nome completo da criança.");
       setDraft((current) => ({ ...current, childName: value }));
-      return goTo("IDADE");
+      return advance("IDADE");
     }
 
     if (step === "IDADE") {
       const validation = validateChildAge(value);
       if (!validation.valid) return setError(validation.error!);
       setDraft((current) => ({ ...current, age: value }));
-      return goTo("LOCALIZACAO");
+      return advance("LOCALIZACAO");
     }
 
     if (step === "LOCALIZACAO") {
-      if (value === NEXT_PAGE_KEY && locationPages > 1) {
-        setLocationPage((page) => (page + 1) % locationPages);
+      if (value === NEXT_PAGE_KEY) {
+        if (!hasNextLocationPage) {
+          return setError(
+            "Não existem mais opções. Escolha um número da lista ou digite 0 para voltar.",
+          );
+        }
+        setLocationPage((page) => page + 1);
         setInput("");
         setError(null);
         return;
+      }
+
+      if (value === FIRST_PAGE_KEY) {
+        if (locationPage === 0) {
+          return setError("Já está na primeira página da lista.");
+        }
+        setLocationPage(0);
+        setInput("");
+        setError(null);
+        return;
+      }
+
+      if (value === OTHER_LOCATION_KEY) {
+        return goTo("OUTRO_BAIRRO");
       }
 
       const bairro = locationMenu.find((item) => item.key === value);
       if (!bairro) {
-        return setError("Digite o número do bairro ou 99 para mais opções.");
+        return setError(
+          hasNextLocationPage
+            ? "Digite o número do bairro ou 99 para mais opções."
+            : "Digite o número do bairro da lista.",
+        );
       }
 
       setDraft((current) => ({ ...current, location: bairro.label }));
-      return goTo("SINTOMA");
+      return advance("SINTOMA");
+    }
+
+    if (step === "OUTRO_BAIRRO") {
+      if (value.length < 3) {
+        return setError("Escreva o nome do bairro onde a criança se encontra.");
+      }
+      setDraft((current) => ({
+        ...current,
+        location: normalizeNeighbourhood(value),
+      }));
+      return advance("SINTOMA");
     }
 
     if (step === "SINTOMA") {
-      // "99" avança para a página seguinte do catálogo. Não pode ser "9",
-      // que já é o número de um sintoma da lista.
-      if (value === NEXT_PAGE_KEY && symptomPages > 1) {
-        setSymptomPage((page) => (page + 1) % symptomPages);
+      if (value === NEXT_PAGE_KEY) {
+        if (!hasNextSymptomPage) {
+          return setError(
+            "Não existem mais opções. Escolha um número da lista ou digite 0 para voltar.",
+          );
+        }
+        setSymptomPage((page) => page + 1);
         setInput("");
         setError(null);
         return;
       }
 
-      if (value === OTHER_KEY) {
+      if (value === FIRST_PAGE_KEY) {
+        if (symptomPage === 0) {
+          return setError("Já está na primeira página da lista.");
+        }
+        setSymptomPage(0);
+        setInput("");
+        setError(null);
+        return;
+      }
+
+      if (value === OTHER_SYMPTOM_KEY) {
         setDraft((current) => ({ ...current, symptoms: [] }));
         return goTo("OUTRO_SINTOMA");
       }
@@ -306,22 +431,20 @@ export function UssdView() {
         symptoms: [option.label],
         otherSymptom: "",
       }));
-      return goTo("CANAL");
+      return advance("CANAL");
     }
 
     if (step === "OUTRO_SINTOMA") {
       if (value.length < 3) return setError("Descreva o sintoma da criança.");
       setDraft((current) => ({ ...current, otherSymptom: value }));
-      return goTo("CANAL");
+      return advance("CANAL");
     }
 
     if (step === "CANAL") {
-      if (value !== "1" && value !== "2") return setError("Digite 1 ou 2.");
-      setDraft((current) => ({
-        ...current,
-        channel: value === "1" ? "VOZ" : "VIDEO",
-      }));
-      return goTo("OBSERVACOES");
+      const option = channelMenu.find((item) => item.key === value);
+      if (!option) return setError("Digite 1, 2 ou 3.");
+      setDraft((current) => ({ ...current, channel: option.value }));
+      return advance("OBSERVACOES");
     }
 
     if (step === "OBSERVACOES") {
@@ -329,20 +452,19 @@ export function UssdView() {
         ...current,
         notes: value === "9" ? "" : value,
       }));
-      return goTo("CONFIRMACAO");
+      return advance("CONFIRMACAO");
     }
 
     if (step === "CONFIRMACAO") {
-      if (value === "2") {
-        // Corrigir: recomeça a recolha mantendo o que já foi digitado.
-        setHistory([]);
-        setStep(guardian ? "NOME" : "ENCARREGADO");
-        setInput("");
-        setError(null);
-        return;
-      }
+      // «Corrigir dados» passou a abrir um menu de escolha do campo, em vez de
+      // reiniciar o preenchimento desde o primeiro campo (§6 do relatório).
+      if (value === "2") return goTo("CORRIGIR");
 
-      if (value !== "1") return setError("Digite 1 para confirmar ou 2 para corrigir.");
+      if (value !== "1") {
+        return setError(
+          "Digite 1 para confirmar e autorizar, ou 2 para corrigir dados.",
+        );
+      }
 
       const child = guardian
         ? children.find(
@@ -363,22 +485,43 @@ export function UssdView() {
         symptoms: draft.symptoms,
         otherSymptom: draft.otherSymptom,
         notes: draft.notes,
-        channel: (draft.channel || "VOZ") as ConsultationChannel,
+        channel: (draft.channel || "AUDIO") as ConsultationChannel,
         source: "USSD",
+        // Confirmar o pedido no menu é o consentimento do encarregado.
+        consent: true,
       });
 
       if (!created.ok) return setError(created.error);
+
+      const screening = screenIntake({
+        symptoms: draft.symptoms,
+        otherSymptom: draft.otherSymptom,
+      });
 
       setResult({
         message: created.data.message,
         reference: created.data.consultation.reference,
         status: statusLabels[created.data.consultation.status],
-        priority: priorityLabels[created.data.consultation.priority],
-        isEmergency: created.data.isEmergency,
+        warning: screening.warning,
       });
       setHistory([]);
+      setReturnTo(null);
       setStep("RESULTADO");
       setInput("");
+      return;
+    }
+
+    if (step === "CORRIGIR") {
+      const field = correctableFields.find((item) => item.key === value);
+      if (!field) {
+        return setError("Digite o número do dado que pretende alterar.");
+      }
+      setReturnTo("CONFIRMACAO");
+      resetPagesFor(field.step);
+      setHistory([]);
+      setStep(field.step);
+      setInput("");
+      setError(null);
       return;
     }
 
@@ -389,6 +532,7 @@ export function UssdView() {
         setSymptomPage(0);
         setLocationPage(0);
         setHistory([]);
+        setReturnTo(null);
         setStep(guardian ? "NOME" : "ENCARREGADO");
         setInput("");
         return;
@@ -429,18 +573,29 @@ export function UssdView() {
           <div>
             <span className="inline-flex items-center gap-2 rounded-full bg-primary-soft px-3 py-1.5 text-xs font-semibold text-secondary-foreground ring-1 ring-primary/15">
               <Smartphone className="size-3.5 text-primary" />
-              Canal offline
+              Simulação do protótipo
             </span>
 
             <h1 className="mt-5 text-3xl font-extrabold tracking-tight sm:text-4xl">
               Simulador USSD · <span className="font-ussd">*123#</span>
             </h1>
             <p className="mt-3 max-w-2xl leading-relaxed text-muted-foreground">
-              Reproduz o atendimento em telemóveis sem internet. Cada ecrã
-              recebe um único campo e o pedido submetido entra directamente na
-              fila de triagem do painel clínico.
+              Mostra como poderia ser solicitada uma teleconsulta num telemóvel
+              sem acesso à Internet. Cada ecrã recebe um único campo e o pedido
+              submetido entra na fila de triagem do painel clínico.
             </p>
           </div>
+
+          {/* Aviso com a redacção aprovada no relatório (§6). */}
+          <Alert variant="warning">
+            <Info />
+            <AlertTitle>Funcionalidade demonstrativa</AlertTitle>
+            <AlertDescription>
+              Esta funcionalidade é uma simulação integrada no protótipo
+              académico. O código *123# é apenas demonstrativo e ainda não está
+              disponível para utilização direta num telemóvel.
+            </AlertDescription>
+          </Alert>
 
           <div className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
             <Label htmlFor="sim-card" className="text-sm font-semibold">
@@ -505,11 +660,12 @@ export function UssdView() {
               {[
                 `Serviço exclusivo para crianças dos 0 aos ${MAX_AGE_YEARS} anos.`,
                 "Digite 0 em qualquer ecrã para voltar ao passo anterior.",
-                "Sintomas críticos geram encaminhamento imediato para a unidade sanitária.",
-                "A localização é escolhida numa lista de bairros de Maputo — não se recolhe rua nem número de porta.",
+                "A plataforma não classifica o pedido: depois da submissão, fica em «Aguardando triagem» até ser analisado por um profissional de saúde.",
+                "A lista de bairros não é fechada — a última opção permite escrever um bairro que não conste da lista.",
+                "Nas listas com várias páginas, «99. Mais opções» só aparece quando existe mesmo uma página seguinte.",
+                "«Corrigir dados» permite escolher o campo a alterar, sem reiniciar o preenchimento.",
                 "Um número ainda não registado cria a ficha do encarregado e liga-lhe a criança do pedido.",
-                "Videochamada: o link é enviado por SMS depois do agendamento e expira 10 minutos após a hora marcada.",
-                "O mesmo encarregado pode registar pedidos para crianças diferentes no mesmo dia.",
+                "As notificações do pedido são simuladas dentro da plataforma — não há envio real de SMS.",
               ].map((rule) => (
                 <li key={rule} className="flex gap-2.5">
                   <ArrowRight className="mt-0.5 size-3.5 shrink-0 text-primary" />
@@ -518,6 +674,8 @@ export function UssdView() {
               ))}
             </ul>
           </div>
+
+          <EmergencyNotice />
         </div>
 
         <div className="lg:sticky lg:top-8 lg:self-start">
@@ -536,7 +694,12 @@ export function UssdView() {
                   <div className="flex gap-2">
                     <Input
                       value={input}
-                      onChange={(event) => setInput(event.target.value)}
+                      onChange={(event) => {
+                        setInput(event.target.value);
+                        // A mensagem de erro deixa de ser aplicável assim que o
+                        // utilizador corrige a resposta (§12 do relatório).
+                        if (error) setError(null);
+                      }}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") submit();
                       }}
@@ -564,8 +727,11 @@ export function UssdView() {
               guardianName={guardian?.name ?? null}
               visibleSymptoms={visibleSymptoms}
               visibleLocations={visibleLocations}
-              hasMorePages={symptomPages > 1}
-              hasMoreLocationPages={locationPages > 1}
+              hasNextSymptomPage={hasNextSymptomPage}
+              hasNextLocationPage={hasNextLocationPage}
+              symptomPage={symptomPage}
+              locationPage={locationPage}
+              correcting={returnTo !== null}
               result={result}
               requests={hydrated ? myRequests : []}
             />
@@ -583,17 +749,33 @@ type ScreenProps = {
   guardianName: string | null;
   visibleSymptoms: { key: string; label: string }[];
   visibleLocations: { key: string; label: string }[];
-  hasMorePages: boolean;
-  hasMoreLocationPages: boolean;
+  hasNextSymptomPage: boolean;
+  hasNextLocationPage: boolean;
+  symptomPage: number;
+  locationPage: number;
+  correcting: boolean;
   result: {
     message: string;
     reference: string;
     status: string;
-    priority: string;
-    isEmergency: boolean;
+    warning: string | null;
   } | null;
-  requests: ReturnType<typeof useClinicStore.getState>["consultations"];
+  requests: Consultation[];
 };
+
+/**
+ * Rodapé de uma lista paginada.
+ *
+ * «99. Mais opções» só existe quando há mesmo uma página seguinte. Na última
+ * página oferece-se «98. Primeiras opções», em vez de um 99 que dava a volta à
+ * lista e confundia o utilizador (§6 do relatório).
+ */
+function pagerLines(hasNext: boolean, page: number) {
+  const lines: string[] = [];
+  if (hasNext) lines.push(`${NEXT_PAGE_KEY}. Mais opções`);
+  else if (page > 0) lines.push(`${FIRST_PAGE_KEY}. Primeiras opções`);
+  return lines;
+}
 
 function UssdScreen({
   step,
@@ -602,11 +784,16 @@ function UssdScreen({
   guardianName,
   visibleSymptoms,
   visibleLocations,
-  hasMorePages,
-  hasMoreLocationPages,
+  hasNextSymptomPage,
+  hasNextLocationPage,
+  symptomPage,
+  locationPage,
+  correcting,
   result,
   requests,
 }: ScreenProps) {
+  const backLine = correcting ? "0. Voltar à confirmação" : "0. Voltar";
+
   if (step === "MENU") {
     return (
       <UssdDialog code="*123#">
@@ -638,7 +825,7 @@ Nome do encarregado de educação:
       <UssdDialog code="*123# · 1/6">
         {`${draft.guardianName ? `Encarregado: ${draft.guardianName}\n\n` : ""}Nome completo da criança:
 
-0. Voltar`}
+${backLine}`}
       </UssdDialog>
     );
   }
@@ -650,7 +837,7 @@ Nome do encarregado de educação:
 
 Idade da criança (0-${MAX_AGE_YEARS} anos):
 
-0. Voltar`}
+${backLine}`}
       </UssdDialog>
     );
   }
@@ -659,12 +846,21 @@ Idade da criança (0-${MAX_AGE_YEARS} anos):
     const options = visibleLocations
       .map((item) => `${item.key}. ${item.label}`)
       .join("\n");
+    const pager = pagerLines(hasNextLocationPage, locationPage);
 
     return (
       <UssdDialog code="*123# · 3/6">
-        {`Bairro (cidade de Maputo):
-${options}
-${hasMoreLocationPages ? "99. Mais opções\n" : ""}0. Voltar`}
+        {[`Bairro (cidade de Maputo):`, options, ...pager, backLine].join("\n")}
+      </UssdDialog>
+    );
+  }
+
+  if (step === "OUTRO_BAIRRO") {
+    return (
+      <UssdDialog code="*123# · 3/6">
+        {`Escreva o nome do bairro:
+
+${backLine}`}
       </UssdDialog>
     );
   }
@@ -673,12 +869,11 @@ ${hasMoreLocationPages ? "99. Mais opções\n" : ""}0. Voltar`}
     const options = visibleSymptoms
       .map((item) => `${item.key}. ${item.label}`)
       .join("\n");
+    const pager = pagerLines(hasNextSymptomPage, symptomPage);
 
     return (
       <UssdDialog code="*123# · 4/6">
-        {`Sintoma principal:
-${options}
-${hasMorePages ? "99. Mais opções\n" : ""}0. Voltar`}
+        {[`Sintoma principal:`, options, ...pager, backLine].join("\n")}
       </UssdDialog>
     );
   }
@@ -688,7 +883,7 @@ ${hasMorePages ? "99. Mais opções\n" : ""}0. Voltar`}
       <UssdDialog code="*123# · 4/6">
         {`Descreva o sintoma da criança:
 
-0. Voltar`}
+${backLine}`}
       </UssdDialog>
     );
   }
@@ -696,11 +891,10 @@ ${hasMorePages ? "99. Mais opções\n" : ""}0. Voltar`}
   if (step === "CANAL") {
     return (
       <UssdDialog code="*123# · 5/6">
-        {`Canal de atendimento:
-1. Chamada de voz
-2. Videochamada
+        {`Modalidade de atendimento:
+${channelMenu.map((item) => `${item.key}. ${item.label}`).join("\n")}
 
-0. Voltar`}
+${backLine}`}
       </UssdDialog>
     );
   }
@@ -711,7 +905,7 @@ ${hasMorePages ? "99. Mais opções\n" : ""}0. Voltar`}
         {`Observações (opcional):
 Escreva ou digite 9 para saltar.
 
-0. Voltar`}
+${backLine}`}
       </UssdDialog>
     );
   }
@@ -730,31 +924,36 @@ Criança: ${draft.childName}
 Idade: ${draft.age} anos
 Bairro: ${draft.location}
 Sintoma: ${symptom}
-Canal: ${draft.channel ? channelLabels[draft.channel] : "—"}
+Modalidade: ${draft.channel ? channelLabels[draft.channel] : "—"}
 Obs.: ${draft.notes || "sem observações"}
 
-1. Confirmar
+Ao confirmar, autoriza a realização da teleconsulta.
+
+1. Confirmar e autorizar
 2. Corrigir dados
 0. Voltar`}
       </UssdDialog>
     );
   }
 
+  if (step === "CORRIGIR") {
+    return (
+      <UssdDialog code="*123# · Corrigir">
+        {`Que dado pretende alterar?
+${correctableFields.map((item) => `${item.key}. ${item.label}`).join("\n")}
+
+0. Voltar à confirmação`}
+      </UssdDialog>
+    );
+  }
+
   if (step === "RESULTADO" && result) {
     return (
-      <UssdDialog
-        code="*123# · Resultado"
-        tone={result.isEmergency ? "danger" : "success"}
-      >
+      <UssdDialog code="*123# · Resultado" tone="success">
         {`${result.message}
 
 Referência: ${result.reference}
-Estado: ${result.status}
-Prioridade: ${result.priority}${
-          draft.channel === "VIDEO" && !result.isEmergency
-            ? "\n\nReceberá o link da videochamada por SMS após o agendamento."
-            : ""
-        }
+Estado: ${result.status}${result.warning ? `\n\n${result.warning}` : ""}
 
 1. Novo pedido
 0. Menu inicial`}
@@ -780,19 +979,13 @@ Prioridade: ${result.priority}${
         const when = item.scheduledAt
           ? `\n   Marcada: ${formatDateTime(item.scheduledAt)}`
           : "";
-        // Um pedido concluído ou encaminhado não tem link activo, seja qual
-        // for o prazo definido no agendamento.
-        const link = !item.meetingLink
-          ? ""
-          : closedStatuses.includes(item.status)
-            ? "\n   Link encerrado"
-            : isMeetingLinkValid(item)
-              ? `\n   Link válido até ${formatTime(item.meetingLinkExpiresAt!)}`
-              : "\n   Link expirado — peça o reenvio ao HGM";
+        const doctor = item.assignedDoctorName
+          ? `\n   Pediatra: ${item.assignedDoctorName}`
+          : "";
 
         return `${item.reference} · ${item.childName}\n   ${
-          statusLabels[item.status]
-        } · ${priorityLabels[item.priority]}${when}${link}`;
+          shortStatusLabels[item.status]
+        }${doctor}${when}`;
       })
       .join("\n\n");
 

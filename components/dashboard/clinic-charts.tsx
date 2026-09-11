@@ -41,8 +41,8 @@ import {
 
 const volumeConfig = {
   restantes: {
-    label: "Normais e avaliação",
-    color: "var(--chart-avaliacao)",
+    label: "Normais e sem triagem",
+    color: "var(--chart-sem-triagem)",
   },
   urgentes: {
     label: "Urgentes e críticos",
@@ -123,13 +123,16 @@ const priorityConfig = {
   total: { label: "Pedidos" },
   CRITICA: { label: priorityLabels.CRITICA, color: "var(--chart-critica)" },
   URGENTE: { label: priorityLabels.URGENTE, color: "var(--chart-urgente)" },
-  AVALIACAO: { label: priorityLabels.AVALIACAO, color: "var(--chart-avaliacao)" },
   NORMAL: { label: priorityLabels.NORMAL, color: "var(--chart-normal)" },
+  SEM_TRIAGEM: {
+    label: priorityLabels.SEM_TRIAGEM,
+    color: "var(--chart-sem-triagem)",
+  },
 } satisfies ChartConfig;
 
 /**
- * Distribuição por gravidade, em barras horizontais — os nomes das categorias
- * são longos e a leitura é de magnitude, não de identidade.
+ * Distribuição por prioridade atribuída na triagem, em barras horizontais — os
+ * nomes das categorias são longos e a leitura é de magnitude, não de identidade.
  */
 export function PriorityChart({ data }: { data: Consultation[] }) {
   const points = useMemo(
@@ -190,34 +193,63 @@ export function PriorityChart({ data }: { data: Consultation[] }) {
 
 // --- Percurso dos pedidos -------------------------------------------------
 
-const stageOrder: ConsultationStatus[] = [
-  "PENDENTE",
-  "AGENDADA",
-  "EM_CURSO",
-  "CONCLUIDA",
-  "ENCAMINHADA",
+/**
+ * Percurso do pedido agrupado pelas fases do serviço.
+ *
+ * Os onze estados do §3 são muitos para uma leitura de conjunto, por isso o
+ * gráfico agrupa-os nas cinco fases por que o pedido passa — mas a legenda
+ * enumera, em cada fase, os estados que a compõem, para que nenhum estado
+ * desapareça da leitura.
+ */
+const stages: {
+  key: string;
+  label: string;
+  statuses: ConsultationStatus[];
+  color: string;
+}[] = [
+  {
+    key: "triagem",
+    label: "Em triagem",
+    statuses: ["SUBMETIDO", "AGUARDA_TRIAGEM"],
+    color: "var(--chart-stage-1)",
+  },
+  {
+    key: "atribuicao",
+    label: "Triado, por atribuir",
+    statuses: ["TRIAGEM_CONCLUIDA", "AGUARDA_ATRIBUICAO"],
+    color: "var(--chart-stage-2)",
+  },
+  {
+    key: "agendamento",
+    label: "Atribuído, por agendar",
+    statuses: ["PEDIATRA_ATRIBUIDO", "AGUARDA_AGENDAMENTO"],
+    color: "var(--chart-stage-3)",
+  },
+  {
+    key: "consulta",
+    label: "Consulta agendada ou em curso",
+    statuses: ["CONSULTA_AGENDADA", "CONSULTA_EM_CURSO"],
+    color: "var(--chart-stage-4)",
+  },
+  {
+    key: "encerrado",
+    label: "Encerrado",
+    statuses: ["CONSULTA_CONCLUIDA", "ENCAMINHADO_PRESENCIAL", "CANCELADO"],
+    color: "var(--chart-stage-5)",
+  },
 ];
 
-const stageConfig = {
-  PENDENTE: { label: statusLabels.PENDENTE, color: "var(--chart-stage-1)" },
-  AGENDADA: { label: statusLabels.AGENDADA, color: "var(--chart-stage-2)" },
-  EM_CURSO: { label: statusLabels.EM_CURSO, color: "var(--chart-stage-3)" },
-  CONCLUIDA: { label: statusLabels.CONCLUIDA, color: "var(--chart-stage-4)" },
-  ENCAMINHADA: { label: statusLabels.ENCAMINHADA, color: "var(--chart-stage-5)" },
-} satisfies ChartConfig;
+const stageConfig = Object.fromEntries(
+  stages.map((stage) => [stage.key, { label: stage.label, color: stage.color }]),
+) satisfies ChartConfig;
 
-/**
- * Percurso dos pedidos: uma só barra empilhada, do estado inicial ao final.
- *
- * Como as fases são ordenadas, a cor é uma rampa sequencial de um só tom em vez
- * de cinco cores independentes — e a barra inteira é, por construção, o total
- * de pedidos registados.
- */
 export function StageChart({ data }: { data: Consultation[] }) {
   const counts = useMemo(() => {
     const row: Record<string, number | string> = { linha: "Pedidos" };
-    for (const status of stageOrder) {
-      row[status] = data.filter((item) => item.status === status).length;
+    for (const stage of stages) {
+      row[stage.key] = data.filter((item) =>
+        stage.statuses.includes(item.status),
+      ).length;
     }
     return [row];
   }, [data]);
@@ -237,19 +269,19 @@ export function StageChart({ data }: { data: Consultation[] }) {
           <XAxis type="number" hide />
           <YAxis type="category" dataKey="linha" hide />
           <ChartTooltip content={<ChartTooltipContent indicator="dot" />} />
-          {stageOrder.map((status, index) => (
+          {stages.map((stage, index) => (
             <Bar
-              key={status}
-              dataKey={status}
+              key={stage.key}
+              dataKey={stage.key}
               stackId="percurso"
-              fill={`var(--color-${status})`}
+              fill={`var(--color-${stage.key})`}
               stroke="var(--card)"
               strokeWidth={2}
               isAnimationActive={false}
               radius={
                 index === 0
                   ? [8, 0, 0, 8]
-                  : index === stageOrder.length - 1
+                  : index === stages.length - 1
                     ? [0, 8, 8, 0]
                     : 0
               }
@@ -260,26 +292,29 @@ export function StageChart({ data }: { data: Consultation[] }) {
 
       {/*
         Legenda com os valores: serve de rótulo directo e de vista em tabela,
-        para quem não distingue os degraus da rampa.
+        para quem não distingue os degraus da rampa. Cada fase enumera os estados
+        que a compõem.
       */}
-      <ul className="mt-4 grid gap-x-5 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
-        {stageOrder.map((status) => (
-          <li
-            key={status}
-            className="flex items-center justify-between gap-3 text-sm"
-          >
-            <span className="flex min-w-0 items-center gap-2">
+      <ul className="mt-4 grid gap-x-5 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+        {stages.map((stage) => (
+          <li key={stage.key} className="flex items-start justify-between gap-3 text-sm">
+            <span className="flex min-w-0 items-start gap-2">
               <span
                 aria-hidden
-                className="size-2.5 shrink-0 rounded-sm"
-                style={{ backgroundColor: `var(--color-${status})` }}
+                className="mt-1.5 size-2.5 shrink-0 rounded-sm"
+                style={{ backgroundColor: stage.color }}
               />
-              <span className="truncate text-muted-foreground">
-                {statusLabels[status]}
+              <span className="min-w-0">
+                <span className="block text-muted-foreground">{stage.label}</span>
+                <span className="block text-xs text-muted-foreground/80">
+                  {stage.statuses
+                    .map((status) => statusLabels[status])
+                    .join(" · ")}
+                </span>
               </span>
             </span>
             <span className="font-semibold tabular-nums">
-              {counts[0][status] as number}
+              {counts[0][stage.key] as number}
             </span>
           </li>
         ))}

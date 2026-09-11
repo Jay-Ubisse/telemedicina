@@ -1,37 +1,49 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   AlertTriangle,
   ArrowLeft,
   CalendarClock,
   CheckCircle2,
+  ClipboardCheck,
   FileText,
   Hospital,
   Link2,
+  ListOrdered,
   Lock,
   MapPin,
   MessageSquare,
   Paperclip,
   Phone,
+  Pill,
   Play,
+  Search,
   Send,
   ShieldAlert,
+  ShieldCheck,
   Trash2,
+  UserCheck,
   User as UserIcon,
 } from "lucide-react";
 
+import { FeedbackAlert } from "@/components/layout/feedback-alert";
 import { AppHeader } from "@/components/layout/app-header";
 import { EmptyState, PageShell } from "@/components/layout/page-shell";
 import { useSession } from "@/components/layout/session-provider";
+import { AssignmentPanel } from "@/components/telemedicine/assignment-panel";
 import { AttachmentsPanel } from "@/components/telemedicine/attachments-panel";
 import { ChannelBadge } from "@/components/telemedicine/channel-badge";
 import { ConsultationRoom } from "@/components/telemedicine/consultation-room";
+import { PrescriptionPanel } from "@/components/telemedicine/prescription-panel";
 import { PriorityBadge } from "@/components/telemedicine/priority-badge";
+import { RequestTimeline } from "@/components/telemedicine/request-timeline";
+import { SchedulingPanel } from "@/components/telemedicine/scheduling-panel";
 import { StatusBadge } from "@/components/telemedicine/status-badge";
+import { TriagePanel } from "@/components/telemedicine/triage-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,7 +54,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -55,94 +66,100 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   accessLevelFor,
-  canActOnConsultation,
+  canAssignDoctor,
+  canCancelRequest,
+  canConductConsultation,
+  canJoinRoom as canJoinRoomFor,
+  canReassignDoctor,
+  canReschedule,
+  canReviewRequest,
+  canSchedule,
   canSeeClinicalRecord,
   canSeeContactDetails,
+  canSeePrescription,
+  canTriage,
+  canWriteClinicalRecord,
+  isOwnRequest,
   maskConsultation,
 } from "@/lib/auth/access";
+import { formatLocation } from "@/lib/data/locations";
+import { useFeedback } from "@/lib/hooks/use-feedback";
 import { MEETING_LINK_GRACE_MINUTES, useClinicStore } from "@/lib/store/clinic-store";
-import { usePediatricians } from "@/lib/store/selectors";
-import type {
-  AccessReason,
-  ConsultationChannel,
-  ConsultationPriority,
-} from "@/lib/types/consultation";
+import type { AccessReason } from "@/lib/types/consultation";
 import {
   accessReasonLabels,
   channelLabels,
   closedStatuses,
-  priorityLabels,
+  statusLabels,
+  triageOutcomeLabels,
 } from "@/lib/types/consultation";
-import { formatLocation } from "@/lib/data/locations";
-import { shortShiftLabels } from "@/lib/types/user";
-import { isMeetingLinkValid } from "@/lib/utils/consultations";
+import { isMeetingLinkValid, symptomText } from "@/lib/utils/consultations";
 import {
   describeAgeYears,
   formatDateTime,
   formatTime,
   timeAgo,
-  toDateTimeLocalValue,
 } from "@/lib/utils/date";
 
-/** Classificações que um pediatra pode atribuir depois de avaliar o caso. */
-const resolvablePriorities: ConsultationPriority[] = [
-  "NORMAL",
-  "URGENTE",
-  "CRITICA",
-];
-
+/**
+ * Detalhe do pedido.
+ *
+ * Os separadores e os botões dependem do perfil e da fase do atendimento, como o
+ * §3 do relatório determina: «Realizar triagem» só existe para o profissional de
+ * triagem, «Atribuir pediatra» para o administrativo depois da triagem, e
+ * «Analisar pedido», «Definir horário», «Realizar consulta» e «Consultar registo»
+ * para o pediatra, conforme a fase. O botão «Triar» desapareceu do painel do
+ * pediatra.
+ */
 export function ConsultationDetail({ id }: { id: string }) {
   const user = useSession();
-  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const consultation = useClinicStore((state) =>
     state.consultations.find((item) => item.id === id),
   );
-  const pediatricians = usePediatricians();
 
-  const scheduleConsultation = useClinicStore((state) => state.scheduleConsultation);
+  const reviewRequest = useClinicStore((state) => state.reviewRequest);
   const startConsultation = useClinicStore((state) => state.startConsultation);
   const completeConsultation = useClinicStore((state) => state.completeConsultation);
   const referConsultation = useClinicStore((state) => state.referConsultation);
-  const resendMeetingLink = useClinicStore((state) => state.resendMeetingLink);
-  const addAttachment = useClinicStore((state) => state.addAttachment);
   const cancelConsultation = useClinicStore((state) => state.cancelConsultation);
+  const requestScheduleChange = useClinicStore(
+    (state) => state.requestScheduleChange,
+  );
+  const resendRoomAccess = useClinicStore((state) => state.resendRoomAccess);
+  const addAttachment = useClinicStore((state) => state.addAttachment);
   const grantExceptionalAccess = useClinicStore(
     (state) => state.grantExceptionalAccess,
   );
 
-  const [tab, setTab] = useState("pedido");
-  const [feedback, setFeedback] = useState<
-    { type: "ok" | "error"; text: string } | null
-  >(null);
+  /**
+   * Separador activo.
+   *
+   * O separador pedido no URL (`?tab=triagem`) é o ponto de partida — é assim que
+   * os botões das listas levam o utilizador directamente à acção que lhe
+   * pertence. A escolha manual sobrepõe-se a esse valor, e é descartada se o URL
+   * passar a pedir outro separador.
+   */
+  const requestedTab = searchParams.get("tab") ?? "pedido";
+  const [picked, setPicked] = useState<{ from: string; tab: string } | null>(null);
+  const tab = picked && picked.from === requestedTab ? picked.tab : requestedTab;
 
-  // Estado dos formulários de acção
-  const [scheduledAt, setScheduledAt] = useState("");
-  const [doctorId, setDoctorId] = useState(
-    user.role === "PEDIATRA" ? user.id : (pediatricians[0]?.id ?? ""),
-  );
-  const [channel, setChannel] = useState<ConsultationChannel>("VIDEO");
+  function setTab(next: string) {
+    setPicked({ from: requestedTab, tab: next });
+  }
+
+  const { feedback, report, showOk, clear } = useFeedback();
+
   const [clinicalNotes, setClinicalNotes] = useState("");
   const [guidance, setGuidance] = useState("");
-  const [finalPriority, setFinalPriority] = useState<ConsultationPriority>("NORMAL");
   const [referralReason, setReferralReason] = useState("");
+  const [cancelReason, setCancelReason] = useState("");
+  const [changeReason, setChangeReason] = useState("");
 
-  // Acesso excepcional (auditoria)
   const [accessDialogOpen, setAccessDialogOpen] = useState(false);
   const [accessReason, setAccessReason] = useState<AccessReason>("APOIO_CLINICO");
   const [accessNote, setAccessNote] = useState("");
-
-  const level = consultation ? accessLevelFor(user, consultation) : "RESTRITO";
-
-  const symptomText = useMemo(
-    () =>
-      consultation
-        ? [...consultation.symptoms, consultation.otherSymptom]
-            .filter(Boolean)
-            .join(", ")
-        : "",
-    [consultation],
-  );
 
   if (!consultation) {
     return (
@@ -153,8 +170,10 @@ export function ConsultationDetail({ id }: { id: string }) {
     );
   }
 
+  const level = accessLevelFor(user, consultation);
+
   // Um encarregado nunca vê o pedido de outra família.
-  if (user.role === "ENCARREGADO" && level !== "COMPLETO") {
+  if (user.role === "ENCARREGADO" && !isOwnRequest(user, consultation)) {
     return (
       <NotFound
         title="Acesso não autorizado"
@@ -166,88 +185,75 @@ export function ConsultationDetail({ id }: { id: string }) {
   const view = maskConsultation(consultation, level);
   const showClinical = canSeeClinicalRecord(level);
   const showContacts = canSeeContactDetails(level);
-  const canAct = canActOnConsultation(user, level);
-  const isRestricted = level === "RESTRITO";
+  const showPrescription = canSeePrescription(user, consultation);
+  const isRestricted = level === "RESTRITO" && user.role === "PEDIATRA";
   const isAdminView = level === "ADMINISTRATIVO";
+  const isTriageView = level === "TRIAGEM";
+  const isGuardian = user.role === "ENCARREGADO";
 
   const isClosed = closedStatuses.includes(consultation.status);
   const linkValid = isMeetingLinkValid(consultation);
   const needsLink = consultation.channel === "VIDEO";
-  // Um link expirado bloqueia a entrada na sala: é a correcção pedida para o
-  // pedido R-1041, onde o sistema avisava da expiração mas mantinha o botão.
+  // Um acesso expirado bloqueia a entrada na sala.
   const linkExpired =
     needsLink && Boolean(consultation.meetingLink) && !linkValid;
-  // Depois de um reenvio fora de horas, o prazo passa a contar do envio e já
-  // não da hora marcada.
-  const isExtendedWindow =
-    Boolean(consultation.scheduledAt && consultation.meetingLinkExpiresAt) &&
-    new Date(consultation.meetingLinkExpiresAt!).getTime() >
-      new Date(consultation.scheduledAt!).getTime() +
-        MEETING_LINK_GRACE_MINUTES * 60_000 +
-        1_000;
-  const canJoinRoom =
-    (consultation.status === "EM_CURSO" || consultation.status === "AGENDADA") &&
-    (!needsLink || linkValid) &&
-    showClinical;
+  const roomOpen = canJoinRoomFor(user, consultation) && (!needsLink || linkValid);
 
-  function notify(result: { ok: boolean; error?: string }, success: string) {
-    if (result.ok) {
-      setFeedback({ type: "ok", text: success });
-    } else {
-      setFeedback({ type: "error", text: result.error ?? "Ocorreu um erro." });
-    }
-  }
+  const mayTriage = canTriage(user, consultation);
+  const mayAssign =
+    canAssignDoctor(user, consultation) || canReassignDoctor(user, consultation);
+  const mayReview = canReviewRequest(user, consultation);
+  const maySchedule = canSchedule(user, consultation);
+  const mayReschedule = canReschedule(user, consultation);
+  const mayConduct = canConductConsultation(user, consultation);
+  const mayWriteRecord = canWriteClinicalRecord(user, consultation);
+  const mayCancel = canCancelRequest(user, consultation);
 
-  function handleSchedule(event: React.FormEvent) {
-    event.preventDefault();
-    const result = scheduleConsultation(consultation!.id, {
-      scheduledAt,
-      doctorId,
-      channel,
-    });
-
-    notify(
-      result,
-      channel === "VIDEO"
-        ? `Teleconsulta agendada. Link enviado por SMS para ${consultation!.phone}.`
-        : "Teleconsulta agendada. O pediatra fará a chamada de voz à hora marcada.",
-    );
-  }
-
-  function handleStart() {
-    const result = startConsultation(consultation!.id, user.id);
-    notify(result, "Teleconsulta iniciada. Entre na sala quando estiver pronto.");
-    if (result.ok) setTab("sala");
-  }
+  const showTriageTab = user.role !== "ENCARREGADO";
+  const showAssignmentTab =
+    user.role === "ADMINISTRATIVO" && consultation.triagedAt !== null;
+  const showSchedulingTab =
+    user.role === "PEDIATRA" && consultation.assignedDoctorId === user.id;
+  const showRecordTab = showClinical || showPrescription;
 
   function handleComplete(event: React.FormEvent) {
     event.preventDefault();
-    const result = completeConsultation(consultation!.id, {
-      clinicalNotes: clinicalNotes || consultation!.clinicalNotes,
-      guidance: guidance || consultation!.guidance,
-      priority:
-        consultation!.priority === "AVALIACAO" ? finalPriority : undefined,
-    });
-    notify(result, "Teleconsulta concluída e registada no histórico clínico.");
+    report(
+      completeConsultation(consultation!.id, {
+        clinicalNotes: clinicalNotes || consultation!.clinicalNotes,
+        guidance: guidance || consultation!.guidance,
+        byId: user.id,
+      }),
+      "Teleconsulta concluída e registada no histórico clínico.",
+    );
   }
 
   function handleRefer(event: React.FormEvent) {
     event.preventDefault();
-    const result = referConsultation(
-      consultation!.id,
-      referralReason,
-      consultation!.priority === "AVALIACAO" ? finalPriority : undefined,
+    report(
+      referConsultation(consultation!.id, referralReason, user.id),
+      "Caso encaminhado para atendimento presencial.",
     );
-    notify(result, "Caso encaminhado para atendimento presencial.");
   }
 
-  function handleCancel() {
-    const result = cancelConsultation(consultation!.id);
-    if (result.ok) {
-      router.push("/teleconsultas");
-      return;
+  function handleCancel(event: React.FormEvent) {
+    event.preventDefault();
+    report(
+      cancelConsultation(consultation!.id, cancelReason, user.id),
+      "Pedido cancelado. O registo fica preservado no histórico.",
+    );
+  }
+
+  function handleChangeRequest(event: React.FormEvent) {
+    event.preventDefault();
+    if (
+      report(
+        requestScheduleChange(consultation!.id, changeReason, user.id),
+        "Pedido de alteração enviado ao pediatra responsável.",
+      )
+    ) {
+      setChangeReason("");
     }
-    notify(result, "");
   }
 
   function handleGrantAccess(event: React.FormEvent) {
@@ -262,13 +268,12 @@ export function ConsultationDetail({ id }: { id: string }) {
     if (result.ok) {
       setAccessDialogOpen(false);
       setAccessNote("");
-      setFeedback({
-        type: "ok",
-        text: "Acesso registado para auditoria. O processo clínico completo está agora visível.",
-      });
+      showOk(
+        "Acesso registado para auditoria. O processo clínico completo está agora visível.",
+      );
       return;
     }
-    notify(result, "");
+    report(result, "");
   }
 
   return (
@@ -290,22 +295,18 @@ export function ConsultationDetail({ id }: { id: string }) {
       />
 
       <PageShell>
-        {consultation.priority === "CRITICA" ? (
+        <FeedbackAlert feedback={feedback} />
+
+        {consultation.priority === "CRITICA" && !isClosed ? (
           <Alert variant="destructive">
             <AlertTriangle />
-            <AlertTitle>Emergência pediátrica</AlertTitle>
+            <AlertTitle>Pedido classificado como crítico na triagem</AlertTitle>
             <AlertDescription>
-              A triagem automática classificou este pedido como crítico e
-              encaminhou-o para atendimento presencial imediato.
-              {consultation.referralReason ? ` ${consultation.referralReason}` : ""}
+              {consultation.triageProfessionalName
+                ? `${consultation.triageProfessionalName} classificou este pedido como crítico. `
+                : ""}
+              Confirme o contacto com o encarregado de educação.
             </AlertDescription>
-          </Alert>
-        ) : null}
-
-        {feedback ? (
-          <Alert variant={feedback.type === "ok" ? "success" : "destructive"}>
-            {feedback.type === "ok" ? <CheckCircle2 /> : <AlertCircle />}
-            <AlertDescription>{feedback.text}</AlertDescription>
           </Alert>
         ) : null}
 
@@ -313,11 +314,12 @@ export function ConsultationDetail({ id }: { id: string }) {
           <Alert variant="warning">
             <Lock />
             <AlertTitle>
-              Processo à responsabilidade de {consultation.assignedDoctorName}
+              Processo à responsabilidade de{" "}
+              {consultation.assignedDoctorName ?? "outro profissional"}
             </AlertTitle>
             <AlertDescription>
-              Vê apenas a informação necessária para acompanhar o serviço. O
-              acesso às notas clínicas, anexos e contactos exige uma
+              Vê apenas a informação necessária para acompanhar o serviço. O acesso
+              às notas clínicas, prescrições, anexos e contactos exige uma
               justificação — substituição do profissional, apoio clínico ou
               encaminhamento interno — que fica registada para auditoria.
             </AlertDescription>
@@ -329,9 +331,21 @@ export function ConsultationDetail({ id }: { id: string }) {
             <Lock />
             <AlertTitle>Vista administrativa</AlertTitle>
             <AlertDescription>
-              Estão disponíveis os dados de gestão do pedido. As notas clínicas,
-              a orientação, os anexos e o chat da consulta pertencem ao processo
-              clínico e não são apresentados neste perfil.
+              Estão disponíveis os dados de gestão do pedido. As notas clínicas, a
+              orientação, a prescrição, os anexos e o chat da consulta pertencem ao
+              processo clínico e não são apresentados neste perfil.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {isTriageView ? (
+          <Alert variant="info">
+            <ClipboardCheck />
+            <AlertTitle>Vista de triagem</AlertTitle>
+            <AlertDescription>
+              Tem acesso aos sintomas, às observações do encarregado e à idade da
+              criança — o necessário para classificar o pedido. As notas clínicas e
+              as prescrições são do pediatra responsável.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -339,20 +353,19 @@ export function ConsultationDetail({ id }: { id: string }) {
         {linkExpired && !isClosed && showClinical ? (
           <Alert variant="destructive">
             <Link2 />
-            <AlertTitle>Link expirado</AlertTitle>
+            <AlertTitle>Acesso à sala expirado</AlertTitle>
             <AlertDescription>
-              O link da videochamada de {consultation.reference} deixou de ser
-              válido{" "}
+              O acesso à sala de {consultation.reference} deixou de ser válido
               {consultation.meetingLinkExpiresAt
-                ? `às ${formatTime(consultation.meetingLinkExpiresAt)}`
+                ? ` às ${formatTime(consultation.meetingLinkExpiresAt)}`
                 : ""}
-              . A entrada na sala está bloqueada até ser enviado um novo link.
+              . A entrada está bloqueada até ser disponibilizado um novo acesso.
             </AlertDescription>
           </Alert>
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge status={consultation.status} />
+          <StatusBadge status={consultation.status} full />
           <PriorityBadge priority={consultation.priority} />
           <ChannelBadge channel={consultation.channel} />
           <span className="text-xs text-muted-foreground">
@@ -360,24 +373,42 @@ export function ConsultationDetail({ id }: { id: string }) {
           </span>
           {linkExpired && !isClosed ? (
             <span className="rounded-full bg-destructive/12 px-2.5 py-1 text-[0.6875rem] font-bold tracking-wide text-destructive uppercase">
-              Link expirado
+              Acesso expirado
             </span>
           ) : null}
         </div>
 
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList>
+          <TabsList className="flex-wrap">
             <TabsTrigger value="pedido">
               <FileText />
               Pedido
             </TabsTrigger>
-            <TabsTrigger value="sala" disabled={!canJoinRoom}>
+            {showTriageTab ? (
+              <TabsTrigger value="triagem">
+                <ClipboardCheck />
+                Triagem
+              </TabsTrigger>
+            ) : null}
+            {showAssignmentTab ? (
+              <TabsTrigger value="atribuicao">
+                <UserCheck />
+                Atribuição
+              </TabsTrigger>
+            ) : null}
+            {showSchedulingTab ? (
+              <TabsTrigger value="agendamento">
+                <CalendarClock />
+                Agendamento
+              </TabsTrigger>
+            ) : null}
+            <TabsTrigger value="sala" disabled={!roomOpen}>
               <MessageSquare />
               Sala
             </TabsTrigger>
-            {canAct && showClinical ? (
+            {showRecordTab ? (
               <TabsTrigger value="registo">
-                <CheckCircle2 />
+                <Pill />
                 Registo clínico
               </TabsTrigger>
             ) : null}
@@ -387,6 +418,10 @@ export function ConsultationDetail({ id }: { id: string }) {
                 Anexos ({consultation.attachments.length})
               </TabsTrigger>
             ) : null}
+            <TabsTrigger value="percurso">
+              <ListOrdered />
+              Percurso
+            </TabsTrigger>
           </TabsList>
 
           {/* --- Pedido --- */}
@@ -397,6 +432,16 @@ export function ConsultationDetail({ id }: { id: string }) {
                   <h2 className="font-bold tracking-tight">Detalhes do pedido</h2>
 
                   <dl className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <Detail
+                      icon={<FileText className="size-4" />}
+                      label="Referência"
+                      value={consultation.reference}
+                    />
+                    <Detail
+                      icon={<UserIcon className="size-4" />}
+                      label="Idade"
+                      value={describeAgeYears(consultation.childAgeYears)}
+                    />
                     <Detail
                       icon={<UserIcon className="size-4" />}
                       label="Encarregado"
@@ -419,43 +464,143 @@ export function ConsultationDetail({ id }: { id: string }) {
                       value={formatDateTime(consultation.createdAt)}
                     />
                     <Detail
+                      icon={<ClipboardCheck className="size-4" />}
+                      label="Profissional de triagem"
+                      value={consultation.triageProfessionalName ?? "Por triar"}
+                      hint={
+                        consultation.triagedAt
+                          ? formatDateTime(consultation.triagedAt)
+                          : undefined
+                      }
+                    />
+                    <Detail
+                      icon={<UserCheck className="size-4" />}
+                      label="Pediatra atribuído"
+                      value={consultation.assignedDoctorName ?? "Por atribuir"}
+                      hint={
+                        consultation.assignedByName
+                          ? `Atribuído por ${consultation.assignedByName}`
+                          : undefined
+                      }
+                    />
+                    <Detail
                       icon={<CalendarClock className="size-4" />}
-                      label="Marcada para"
+                      label="Data / hora da consulta"
                       value={
                         consultation.scheduledAt
-                          ? formatDateTime(consultation.scheduledAt)
+                          ? `${formatDateTime(consultation.scheduledAt)}${
+                              consultation.durationMinutes
+                                ? ` · ${consultation.durationMinutes} min`
+                                : ""
+                            }`
                           : "Por agendar"
                       }
                     />
                     <Detail
-                      icon={<UserIcon className="size-4" />}
-                      label="Pediatra"
-                      value={consultation.assignedDoctorName ?? "Por atribuir"}
+                      icon={<MessageSquare className="size-4" />}
+                      label="Canal"
+                      value={channelLabels[consultation.channel]}
                     />
+                    <Detail
+                      icon={<ListOrdered className="size-4" />}
+                      label="Estado"
+                      value={statusLabels[consultation.status]}
+                    />
+                    {consultation.preferredDoctorName ? (
+                      <Detail
+                        icon={<UserIcon className="size-4" />}
+                        label="Pediatra de preferência"
+                        value={consultation.preferredDoctorName}
+                        hint="Sujeita à disponibilidade"
+                      />
+                    ) : null}
                   </dl>
 
                   <div className="mt-5 border-t border-border pt-5">
                     <p className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
                       Sintomas
                     </p>
-                    <p className="mt-2 leading-relaxed">{symptomText || "—"}</p>
+                    <p className="mt-2 leading-relaxed">
+                      {symptomText(consultation)}
+                    </p>
                   </div>
 
-                  {view.notes ? (
+                  <div className="mt-5 border-t border-border pt-5">
+                    <p className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
+                      Observações do encarregado
+                    </p>
+                    <p className="mt-2 leading-relaxed text-muted-foreground">
+                      {view.notes || "Sem observações."}
+                    </p>
+                  </div>
+
+                  {consultation.triageObservations && !isGuardian ? (
                     <div className="mt-5 border-t border-border pt-5">
                       <p className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
-                        Observações do encarregado
+                        Observações da triagem
                       </p>
                       <p className="mt-2 leading-relaxed text-muted-foreground">
-                        {view.notes}
+                        {consultation.triageObservations}
+                      </p>
+                      {consultation.triageOutcome ? (
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          Seguimento: {triageOutcomeLabels[consultation.triageOutcome]}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {consultation.assignmentNote ? (
+                    <div className="mt-5 border-t border-border pt-5">
+                      <p className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
+                        Nota administrativa
+                      </p>
+                      <p className="mt-2 leading-relaxed text-muted-foreground">
+                        {consultation.assignmentNote}
                       </p>
                     </div>
                   ) : null}
+
+                  {consultation.schedulingNotes ? (
+                    <div className="mt-5 border-t border-border pt-5">
+                      <p className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
+                        Observações do agendamento
+                      </p>
+                      <p className="mt-2 leading-relaxed text-muted-foreground">
+                        {consultation.schedulingNotes}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {consultation.cancelReason ? (
+                    <div className="mt-5 border-t border-border pt-5">
+                      <p className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
+                        Motivo do cancelamento
+                      </p>
+                      <p className="mt-2 leading-relaxed text-muted-foreground">
+                        {consultation.cancelReason}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {/* Consentimento do encarregado (§4) */}
+                  <div className="mt-5 flex gap-3 border-t border-border pt-5">
+                    <ShieldCheck
+                      aria-hidden
+                      className="mt-0.5 size-4 shrink-0 text-success"
+                    />
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      {consultation.consentGivenAt
+                        ? `Consentimento do encarregado de educação registado em ${formatDateTime(consultation.consentGivenAt)}. A teleconsulta não é gravada automaticamente.`
+                        : "Falta o consentimento do encarregado de educação para a realização da teleconsulta."}
+                    </p>
+                  </div>
                 </section>
 
+                {/* Acesso à sala */}
                 {consultation.channel === "VIDEO" && showClinical ? (
                   <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
-                    <h2 className="font-bold tracking-tight">Link da videochamada</h2>
+                    <h2 className="font-bold tracking-tight">Acesso à sala</h2>
 
                     {consultation.meetingLink ? (
                       <>
@@ -470,81 +615,39 @@ export function ConsultationDetail({ id }: { id: string }) {
                         </p>
                         <p className="mt-2.5 text-sm text-muted-foreground">
                           {isClosed
-                            ? "A teleconsulta foi encerrada — o link deixou de ser válido."
+                            ? "A teleconsulta foi encerrada — o acesso deixou de ser válido."
                             : linkValid
                               ? `Válido até às ${formatTime(
                                   consultation.meetingLinkExpiresAt!,
-                                )} — ${MEETING_LINK_GRACE_MINUTES} minutos após ${
-                                  isExtendedWindow ? "o reenvio" : "a hora marcada"
-                                }.`
-                              : "Este link expirou. Reenvie-o por SMS para gerar um novo prazo."}
-                          {consultation.smsSentAt
-                            ? ` SMS enviado ${timeAgo(consultation.smsSentAt).toLowerCase()}.`
+                                )} — ${MEETING_LINK_GRACE_MINUTES} minutos após a hora marcada.`
+                              : "Este acesso expirou. Disponibilize um novo acesso para abrir uma nova janela."}
+                          {consultation.accessNotifiedAt
+                            ? ` Notificação simulada enviada ${timeAgo(consultation.accessNotifiedAt).toLowerCase()}.`
                             : ""}
                         </p>
                       </>
                     ) : (
                       <p className="mt-3 text-sm text-muted-foreground">
-                        O link é gerado e enviado por SMS quando a teleconsulta
-                        for agendada.
+                        O acesso à sala é gerado quando o horário da teleconsulta
+                        for definido.
                       </p>
                     )}
 
-                    {canAct && consultation.scheduledAt && !isClosed ? (
+                    {mayWriteRecord && consultation.scheduledAt && !isClosed ? (
                       <Button
                         variant={linkExpired ? "default" : "outline"}
                         size="lg"
                         className="mt-4"
                         onClick={() =>
-                          notify(
-                            resendMeetingLink(consultation.id),
-                            `Novo link enviado por SMS para ${consultation.phone}. Válido durante mais ${MEETING_LINK_GRACE_MINUTES} minutos.`,
+                          report(
+                            resendRoomAccess(consultation.id, user.id),
+                            `Novo acesso disponibilizado ao encarregado por notificação simulada. Válido durante mais ${MEETING_LINK_GRACE_MINUTES} minutos.`,
                           )
                         }
                       >
                         <Send data-icon="inline-start" />
-                        Reenviar link por SMS
+                        Disponibilizar novo acesso
                       </Button>
-                    ) : null}
-                  </section>
-                ) : null}
-
-                {showClinical &&
-                (consultation.guidance || consultation.clinicalNotes) ? (
-                  <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
-                    <h2 className="font-bold tracking-tight">Resultado da consulta</h2>
-
-                    {consultation.clinicalNotes ? (
-                      <div className="mt-4">
-                        <p className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
-                          Notas clínicas
-                        </p>
-                        <p className="mt-1.5 leading-relaxed">
-                          {consultation.clinicalNotes}
-                        </p>
-                      </div>
-                    ) : null}
-
-                    {consultation.guidance ? (
-                      <div className="mt-4">
-                        <p className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
-                          Orientação
-                        </p>
-                        <p className="mt-1.5 leading-relaxed">
-                          {consultation.guidance}
-                        </p>
-                      </div>
-                    ) : null}
-
-                    {consultation.referralReason ? (
-                      <div className="mt-4">
-                        <p className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
-                          Encaminhamento
-                        </p>
-                        <p className="mt-1.5 leading-relaxed">
-                          {consultation.referralReason}
-                        </p>
-                      </div>
                     ) : null}
                   </section>
                 ) : null}
@@ -552,9 +655,7 @@ export function ConsultationDetail({ id }: { id: string }) {
                 {/* Auditoria dos acessos excepcionais */}
                 {showClinical && consultation.accessLog?.length ? (
                   <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
-                    <h2 className="font-bold tracking-tight">
-                      Acessos registados
-                    </h2>
+                    <h2 className="font-bold tracking-tight">Acessos registados</h2>
                     <ul className="mt-4 space-y-3">
                       {consultation.accessLog.map((entry) => (
                         <li
@@ -578,317 +679,333 @@ export function ConsultationDetail({ id }: { id: string }) {
                 ) : null}
               </div>
 
-              {/* Acções */}
+              {/* Acções por perfil e fase */}
               <aside className="space-y-4 xl:sticky xl:top-24 xl:self-start">
-                {isRestricted ? (
-                  <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
-                    <h2 className="font-bold tracking-tight">Acesso ao processo</h2>
-                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                      Só o pediatra responsável acede ao processo clínico
-                      completo. Se precisa de intervir neste caso, justifique o
-                      acesso.
-                    </p>
+                {mayTriage ? (
+                  <ActionCard
+                    title="Triagem do pedido"
+                    description="Este pedido aguarda triagem. Analise os sintomas, atribua a prioridade e registe as observações."
+                  >
                     <Button
                       size="lg"
-                      className="mt-4 w-full"
+                      className="w-full"
+                      onClick={() => setTab("triagem")}
+                    >
+                      <ClipboardCheck data-icon="inline-start" />
+                      Realizar triagem
+                    </Button>
+                  </ActionCard>
+                ) : null}
+
+                {mayAssign ? (
+                  <ActionCard
+                    title="Atribuição"
+                    description="Consulte a disponibilidade dos pediatras e atribua o pedido."
+                  >
+                    <Button
+                      size="lg"
+                      className="w-full"
+                      onClick={() => setTab("atribuicao")}
+                    >
+                      <UserCheck data-icon="inline-start" />
+                      {consultation.assignedDoctorId
+                        ? "Reatribuir pediatra"
+                        : "Atribuir pediatra"}
+                    </Button>
+                  </ActionCard>
+                ) : null}
+
+                {mayReview ? (
+                  <ActionCard
+                    title="Pedido atribuído a si"
+                    description="Consulte os dados da triagem e confirme que analisou o pedido antes de definir o horário."
+                  >
+                    <Button
+                      size="lg"
+                      className="w-full"
+                      onClick={() => {
+                        if (
+                          report(
+                            reviewRequest(consultation.id, user.id),
+                            "Pedido analisado. Pode agora definir o horário do atendimento.",
+                          )
+                        ) {
+                          setTab("agendamento");
+                        }
+                      }}
+                    >
+                      <Search data-icon="inline-start" />
+                      Analisar pedido
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="lg"
+                      className="mt-2 w-full"
+                      onClick={() => setTab("triagem")}
+                    >
+                      Consultar triagem
+                    </Button>
+                  </ActionCard>
+                ) : null}
+
+                {maySchedule || mayReschedule ? (
+                  <ActionCard
+                    title={maySchedule ? "Horário por definir" : "Consulta agendada"}
+                    description={
+                      maySchedule
+                        ? "Escolha a data, a hora, a duração prevista, a modalidade e as observações."
+                        : `Marcada para ${formatDateTime(consultation.scheduledAt!)}.`
+                    }
+                  >
+                    <Button
+                      size="lg"
+                      className="w-full"
+                      onClick={() => setTab("agendamento")}
+                    >
+                      <CalendarClock data-icon="inline-start" />
+                      {maySchedule ? "Definir horário" : "Actualizar agendamento"}
+                    </Button>
+                  </ActionCard>
+                ) : null}
+
+                {mayConduct ? (
+                  consultation.status === "CONSULTA_AGENDADA" ? (
+                    linkExpired ? (
+                      <Alert variant="warning">
+                        <Link2 />
+                        <AlertTitle>Entrada bloqueada</AlertTitle>
+                        <AlertDescription>
+                          Disponibilize um novo acesso à sala para abrir uma nova
+                          janela de entrada.
+                        </AlertDescription>
+                      </Alert>
+                    ) : (
+                      <Button
+                        size="xl"
+                        className="w-full"
+                        onClick={() => {
+                          if (
+                            report(
+                              startConsultation(consultation.id, user.id),
+                              "Teleconsulta iniciada. Entre na sala quando estiver pronto.",
+                            )
+                          ) {
+                            setTab("sala");
+                          }
+                        }}
+                      >
+                        <Play data-icon="inline-start" />
+                        Realizar consulta
+                      </Button>
+                    )
+                  ) : (
+                    <Button
+                      size="xl"
+                      className="w-full"
+                      onClick={() => setTab("sala")}
+                    >
+                      <MessageSquare data-icon="inline-start" />
+                      Ir para a sala
+                    </Button>
+                  )
+                ) : null}
+
+                {mayWriteRecord && isClosed ? (
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    className="w-full"
+                    onClick={() => setTab("registo")}
+                  >
+                    <FileText data-icon="inline-start" />
+                    Consultar registo
+                  </Button>
+                ) : null}
+
+                {/* Encaminhamento para presencial */}
+                {mayWriteRecord && !isClosed ? (
+                  <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+                    <h2 className="font-bold tracking-tight">
+                      Encaminhar para atendimento presencial
+                    </h2>
+                    <form onSubmit={handleRefer} className="mt-3 space-y-3">
+                      <Textarea
+                        rows={3}
+                        required
+                        aria-required="true"
+                        value={referralReason}
+                        onChange={(event) => {
+                          setReferralReason(event.target.value);
+                          clear();
+                        }}
+                        placeholder="Motivo clínico do encaminhamento…"
+                        className="rounded-xl"
+                        aria-label="Motivo do encaminhamento"
+                      />
+                      <Button
+                        type="submit"
+                        variant="destructive"
+                        size="lg"
+                        className="w-full"
+                      >
+                        <Hospital data-icon="inline-start" />
+                        Encaminhar
+                      </Button>
+                    </form>
+                  </section>
+                ) : null}
+
+                {isRestricted ? (
+                  <ActionCard
+                    title="Acesso ao processo"
+                    description="Só o pediatra responsável acede ao processo clínico completo. Se precisa de intervir neste caso, justifique o acesso."
+                  >
+                    <Button
+                      size="lg"
+                      className="w-full"
                       onClick={() => setAccessDialogOpen(true)}
                     >
                       <ShieldAlert data-icon="inline-start" />
                       Justificar acesso
                     </Button>
-                  </section>
+                  </ActionCard>
                 ) : null}
 
-                {isAdminView ? (
-                  <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
-                    <h2 className="font-bold tracking-tight">Gestão do pedido</h2>
-                    <dl className="mt-4 space-y-3 text-sm">
-                      <div className="flex justify-between gap-3">
-                        <dt className="text-muted-foreground">Origem</dt>
-                        <dd className="font-medium">{consultation.source}</dd>
-                      </div>
-                      <div className="flex justify-between gap-3">
-                        <dt className="text-muted-foreground">Canal</dt>
-                        <dd className="font-medium">
-                          {channelLabels[consultation.channel]}
-                        </dd>
-                      </div>
-                      <div className="flex justify-between gap-3">
-                        <dt className="text-muted-foreground">Anexos</dt>
-                        <dd className="font-medium tabular-nums">
-                          {consultation.attachments.length}
-                        </dd>
-                      </div>
-                      <div className="flex justify-between gap-3">
-                        <dt className="text-muted-foreground">Encerrado em</dt>
-                        <dd className="font-medium">
-                          {consultation.closedAt
-                            ? formatDateTime(consultation.closedAt)
-                            : "—"}
-                        </dd>
-                      </div>
-                    </dl>
-                  </section>
-                ) : null}
-
-                {canAct ? (
-                  <>
-                    {consultation.status === "PENDENTE" ||
-                    consultation.status === "AGENDADA" ? (
-                      <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
-                        <h2 className="font-bold tracking-tight">
-                          {consultation.status === "AGENDADA"
-                            ? "Reagendar"
-                            : "Agendar teleconsulta"}
-                        </h2>
-
-                        <form onSubmit={handleSchedule} className="mt-4 space-y-4">
-                          <div>
-                            <Label htmlFor="scheduled-at" className="text-sm font-semibold">
-                              Data e hora
-                            </Label>
-                            <Input
-                              id="scheduled-at"
-                              type="datetime-local"
-                              value={
-                                scheduledAt ||
-                                (consultation.scheduledAt
-                                  ? toDateTimeLocalValue(consultation.scheduledAt)
-                                  : "")
-                              }
-                              onChange={(event) => setScheduledAt(event.target.value)}
-                              // Não se marca uma teleconsulta para trás: o
-                              // protótipo testado aceitava datas passadas.
-                              min={toDateTimeLocalValue(new Date())}
-                              className="mt-2 h-11 rounded-xl px-3.5"
-                              required
-                              aria-required="true"
-                            />
-                            <p className="mt-1.5 text-xs text-muted-foreground">
-                              Só são aceites horários futuros.
-                            </p>
-                          </div>
-
-                          <div>
-                            <Label htmlFor="doctor" className="text-sm font-semibold">
-                              Pediatra responsável
-                            </Label>
-                            <Select value={doctorId} onValueChange={setDoctorId}>
-                              <SelectTrigger id="doctor" className="mt-2 h-11 w-full rounded-xl">
-                                <SelectValue placeholder="Seleccione" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {pediatricians.map((doctor) => (
-                                  <SelectItem key={doctor.id} value={doctor.id}>
-                                    {doctor.name}
-                                    {doctor.shift
-                                      ? ` · ${shortShiftLabels[doctor.shift]}`
-                                      : ""}
-                                    {doctor.available === false
-                                      ? " (fora de turno)"
-                                      : ""}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div>
-                            <Label htmlFor="channel" className="text-sm font-semibold">
-                              Canal
-                            </Label>
-                            <Select
-                              value={channel}
-                              onValueChange={(value) =>
-                                setChannel(value as ConsultationChannel)
-                              }
-                            >
-                              <SelectTrigger id="channel" className="mt-2 h-11 w-full rounded-xl">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="VIDEO">
-                                  {channelLabels.VIDEO}
-                                </SelectItem>
-                                <SelectItem value="VOZ">{channelLabels.VOZ}</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            {channel === "VIDEO" ? (
-                              <p className="mt-1.5 text-xs text-muted-foreground">
-                                O link é enviado por SMS e expira{" "}
-                                {MEETING_LINK_GRACE_MINUTES} minutos após a hora
-                                marcada.
-                              </p>
-                            ) : null}
-                          </div>
-
-                          <Button type="submit" size="lg" className="w-full">
-                            <CalendarClock data-icon="inline-start" />
-                            {consultation.status === "AGENDADA"
-                              ? "Actualizar agendamento"
-                              : "Agendar e notificar"}
-                          </Button>
-                        </form>
-                      </section>
-                    ) : null}
-
-                    {consultation.status === "AGENDADA" ? (
-                      linkExpired ? (
-                        <Alert variant="warning">
-                          <Link2 />
-                          <AlertTitle>Entrada bloqueada</AlertTitle>
-                          <AlertDescription>
-                            Reenvie o link por SMS para abrir uma nova janela de
-                            acesso à sala.
-                          </AlertDescription>
-                        </Alert>
-                      ) : (
-                        <Button size="xl" className="w-full" onClick={handleStart}>
-                          <Play data-icon="inline-start" />
-                          Iniciar teleconsulta
-                        </Button>
-                      )
-                    ) : null}
-
-                    {consultation.status === "EM_CURSO" ? (
-                      linkExpired ? (
-                        <Alert variant="warning">
-                          <Link2 />
-                          <AlertTitle>Sala indisponível</AlertTitle>
-                          <AlertDescription>
-                            O link desta videochamada expirou. Reenvie-o por SMS
-                            para retomar a teleconsulta.
-                          </AlertDescription>
-                        </Alert>
-                      ) : (
-                        <Button
-                          size="xl"
-                          className="w-full"
-                          onClick={() => setTab("sala")}
-                        >
-                          <MessageSquare data-icon="inline-start" />
-                          Ir para a sala
-                        </Button>
-                      )
-                    ) : null}
-
-                    {!isClosed ? (
-                      <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
-                        <h2 className="font-bold tracking-tight">
-                          Encaminhar para presencial
-                        </h2>
-                        <form onSubmit={handleRefer} className="mt-3 space-y-3">
-                          <Textarea
-                            rows={3}
-                            required
-                            aria-required="true"
-                            value={referralReason}
-                            onChange={(event) => setReferralReason(event.target.value)}
-                            placeholder="Motivo clínico do encaminhamento…"
-                            className="rounded-xl"
-                            aria-label="Motivo do encaminhamento"
-                          />
-
-                          {consultation.priority === "AVALIACAO" ? (
-                            <PriorityResolver
-                              value={finalPriority}
-                              onChange={setFinalPriority}
-                            />
-                          ) : null}
-
-                          <Button
-                            type="submit"
-                            variant="destructive"
-                            size="lg"
-                            className="w-full"
-                          >
-                            <Hospital data-icon="inline-start" />
-                            Encaminhar
-                          </Button>
-                        </form>
-                      </section>
-                    ) : null}
-                  </>
-                ) : null}
-
-                {user.role === "ENCARREGADO" ? (
+                {/* Painel do encarregado */}
+                {isGuardian ? (
                   <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
                     <h2 className="font-bold tracking-tight">O seu pedido</h2>
                     <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                      {consultation.status === "PENDENTE"
-                        ? "A equipa do HGM está a avaliar o pedido. Será contactado assim que houver horário."
-                        : consultation.status === "AGENDADA"
-                          ? `Teleconsulta marcada para ${formatDateTime(
-                              consultation.scheduledAt!,
-                            )} com ${consultation.assignedDoctorName}.`
-                          : consultation.status === "EM_CURSO"
-                            ? "A teleconsulta está a decorrer. Entre na sala."
-                            : consultation.status === "CONCLUIDA"
-                              ? "Consulta concluída. Consulte a orientação clínica acima."
-                              : "Caso encaminhado para atendimento presencial."}
+                      {guardianStatusMessage(consultation.status, consultation)}
                     </p>
 
-                    {canJoinRoom ? (
+                    {roomOpen ? (
                       <Button
                         size="lg"
                         className="mt-4 w-full"
                         onClick={() => setTab("sala")}
                       >
                         <MessageSquare data-icon="inline-start" />
-                        Abrir sala
+                        Entrar na consulta
                       </Button>
+                    ) : null}
+
+                    {consultation.status === "CONSULTA_AGENDADA" ? (
+                      <form onSubmit={handleChangeRequest} className="mt-4 space-y-2.5">
+                        <Label
+                          htmlFor="change-reason"
+                          className="text-sm font-semibold"
+                        >
+                          Pedir alteração do horário
+                        </Label>
+                        <Textarea
+                          id="change-reason"
+                          rows={3}
+                          required
+                          aria-required="true"
+                          minLength={10}
+                          value={changeReason}
+                          onChange={(event) => {
+                            setChangeReason(event.target.value);
+                            clear();
+                          }}
+                          placeholder="Explique porque precisa de outro horário…"
+                          className="rounded-xl"
+                        />
+                        <Button type="submit" variant="outline" size="lg" className="w-full">
+                          <CalendarClock data-icon="inline-start" />
+                          Enviar pedido de alteração
+                        </Button>
+                      </form>
                     ) : null}
 
                     {linkExpired && !isClosed ? (
                       <Alert variant="warning" className="mt-4">
                         <Link2 />
                         <AlertDescription>
-                          O link desta videochamada expirou. Contacte o HGM para
-                          receber um novo link por SMS.
+                          O acesso a esta sala expirou. O pediatra responsável pode
+                          disponibilizar um novo acesso.
                         </AlertDescription>
                       </Alert>
-                    ) : null}
-
-                    {consultation.status === "PENDENTE" ? (
-                      <Button
-                        variant="destructive"
-                        size="lg"
-                        className="mt-2.5 w-full"
-                        onClick={handleCancel}
-                      >
-                        <Trash2 data-icon="inline-start" />
-                        Cancelar pedido
-                      </Button>
                     ) : null}
                   </section>
                 ) : null}
 
-                {consultation.channel === "VIDEO" && linkValid && showClinical ? (
-                  <Alert variant="info">
-                    <Link2 />
-                    <AlertDescription>
-                      Link da sala activo até às{" "}
-                      {formatTime(consultation.meetingLinkExpiresAt!)}.
-                    </AlertDescription>
-                  </Alert>
+                {/* Cancelamento */}
+                {mayCancel ? (
+                  <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+                    <h2 className="font-bold tracking-tight">Cancelar pedido</h2>
+                    <p className="mt-1.5 text-sm text-muted-foreground">
+                      O pedido passa ao estado «Cancelado» e o registo fica
+                      preservado no histórico.
+                    </p>
+                    <form onSubmit={handleCancel} className="mt-3 space-y-2.5">
+                      <Textarea
+                        rows={2}
+                        value={cancelReason}
+                        onChange={(event) => {
+                          setCancelReason(event.target.value);
+                          clear();
+                        }}
+                        placeholder="Motivo do cancelamento (opcional)"
+                        aria-label="Motivo do cancelamento"
+                        className="rounded-xl"
+                      />
+                      <Button
+                        type="submit"
+                        variant="destructive"
+                        size="lg"
+                        className="w-full"
+                      >
+                        <Trash2 data-icon="inline-start" />
+                        Cancelar pedido
+                      </Button>
+                    </form>
+                  </section>
                 ) : null}
               </aside>
             </div>
           </TabsContent>
 
+          {/* --- Triagem --- */}
+          {showTriageTab ? (
+            <TabsContent value="triagem" className="mt-5">
+              <div className="max-w-4xl">
+                <TriagePanel consultation={consultation} viewer={user} />
+              </div>
+            </TabsContent>
+          ) : null}
+
+          {/* --- Atribuição --- */}
+          {showAssignmentTab ? (
+            <TabsContent value="atribuicao" className="mt-5">
+              <div className="max-w-4xl">
+                <AssignmentPanel consultation={consultation} viewer={user} />
+              </div>
+            </TabsContent>
+          ) : null}
+
+          {/* --- Agendamento --- */}
+          {showSchedulingTab ? (
+            <TabsContent value="agendamento" className="mt-5">
+              <div className="max-w-4xl">
+                <SchedulingPanel consultation={consultation} viewer={user} />
+              </div>
+            </TabsContent>
+          ) : null}
+
           {/* --- Sala --- */}
           <TabsContent value="sala" className="mt-5">
-            {canJoinRoom ? (
+            {roomOpen ? (
               <ConsultationRoom
                 consultation={consultation}
                 viewer={user}
                 onEnded={() => {
-                  if (canAct) {
+                  if (mayWriteRecord) {
                     setTab("registo");
-                    setFeedback({
-                      type: "ok",
-                      text: "Chamada encerrada. Registe a orientação clínica para concluir a consulta.",
-                    });
+                    showOk(
+                      "Chamada encerrada. Registe a orientação clínica para concluir a consulta.",
+                    );
                   }
                 }}
               />
@@ -897,71 +1014,141 @@ export function ConsultationDetail({ id }: { id: string }) {
                 <EmptyState
                   icon={<Link2 className="size-5" />}
                   title="Sala indisponível"
-                  description="O link desta videochamada não está activo. É preciso reenviá-lo por SMS antes de entrar na sala."
+                  description="A sala abre quando a teleconsulta estiver agendada e o acesso válido. Só o encarregado da criança e o pediatra responsável entram na consulta."
                 />
               </div>
             )}
           </TabsContent>
 
-          {/* --- Registo clínico --- */}
-          {canAct && showClinical ? (
+          {/* --- Registo clínico e prescrição --- */}
+          {showRecordTab ? (
             <TabsContent value="registo" className="mt-5">
-              <div className="max-w-3xl rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
-                <h2 className="font-bold tracking-tight">Encerrar teleconsulta</h2>
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  As notas ficam no histórico clínico da criança; a orientação é
-                  partilhada com o encarregado.
-                </p>
+              <div className="max-w-4xl space-y-6">
+                {/* Resultado já registado */}
+                {showClinical &&
+                (consultation.clinicalNotes ||
+                  consultation.guidance ||
+                  consultation.referralReason) ? (
+                  <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+                    <h2 className="font-bold tracking-tight">
+                      Resultado da consulta
+                    </h2>
 
-                <form onSubmit={handleComplete} className="mt-5 space-y-4">
-                  <div>
-                    <Label htmlFor="clinical-notes" className="text-sm font-semibold">
-                      Notas clínicas
-                    </Label>
-                    <Textarea
-                      id="clinical-notes"
-                      rows={4}
-                      value={clinicalNotes || consultation.clinicalNotes}
-                      onChange={(event) => setClinicalNotes(event.target.value)}
-                      placeholder="Avaliação, hipótese diagnóstica, sinais observados…"
-                      className="mt-2 rounded-xl"
-                    />
-                  </div>
+                    {consultation.clinicalNotes ? (
+                      <div className="mt-4">
+                        <p className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
+                          Notas clínicas
+                        </p>
+                        <p className="mt-1.5 leading-relaxed">
+                          {consultation.clinicalNotes}
+                        </p>
+                      </div>
+                    ) : null}
 
-                  <div>
-                    <Label htmlFor="guidance" className="text-sm font-semibold">
-                      Orientação para o encarregado
-                    </Label>
-                    <Textarea
-                      id="guidance"
-                      rows={4}
-                      value={guidance || consultation.guidance}
-                      onChange={(event) => setGuidance(event.target.value)}
-                      placeholder="Medicação, cuidados em casa, sinais de alarme, reavaliação…"
-                      className="mt-2 rounded-xl"
-                      required
-                      aria-required="true"
-                    />
-                  </div>
+                    {consultation.guidance ? (
+                      <div className="mt-4">
+                        <p className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
+                          Orientação clínica
+                        </p>
+                        <p className="mt-1.5 leading-relaxed">
+                          {consultation.guidance}
+                        </p>
+                      </div>
+                    ) : null}
 
-                  {consultation.priority === "AVALIACAO" ? (
-                    <PriorityResolver
-                      value={finalPriority}
-                      onChange={setFinalPriority}
-                    />
-                  ) : null}
+                    {consultation.referralReason ? (
+                      <div className="mt-4">
+                        <p className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
+                          Encaminhamento
+                        </p>
+                        <p className="mt-1.5 leading-relaxed">
+                          {consultation.referralReason}
+                        </p>
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
 
-                  <Button
-                    type="submit"
-                    size="xl"
-                    disabled={consultation.status === "CONCLUIDA"}
-                  >
-                    <CheckCircle2 data-icon="inline-start" />
-                    {consultation.status === "CONCLUIDA"
-                      ? "Consulta já concluída"
-                      : "Concluir teleconsulta"}
-                  </Button>
-                </form>
+                {/* Prescrição */}
+                {showPrescription ? (
+                  <PrescriptionPanel
+                    consultation={consultation}
+                    viewer={user}
+                    readOnly={isGuardian}
+                  />
+                ) : null}
+
+                {/* Encerramento da consulta */}
+                {mayWriteRecord && !isClosed ? (
+                  <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+                    <h2 className="font-bold tracking-tight">
+                      Encerrar teleconsulta
+                    </h2>
+                    <p className="mt-0.5 text-sm text-muted-foreground">
+                      As notas ficam no histórico clínico da criança; a orientação é
+                      partilhada com o encarregado de educação.
+                    </p>
+
+                    <form onSubmit={handleComplete} className="mt-5 space-y-4">
+                      <div>
+                        <Label
+                          htmlFor="clinical-notes"
+                          className="text-sm font-semibold"
+                        >
+                          Notas clínicas
+                        </Label>
+                        <Textarea
+                          id="clinical-notes"
+                          rows={4}
+                          value={clinicalNotes || consultation.clinicalNotes}
+                          onChange={(event) => {
+                            setClinicalNotes(event.target.value);
+                            clear();
+                          }}
+                          placeholder="Avaliação do pedido, sinais observados, hipóteses consideradas…"
+                          className="mt-2 rounded-xl"
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor="guidance" className="text-sm font-semibold">
+                          Orientação para o encarregado
+                          <span aria-hidden className="ml-0.5 text-destructive">
+                            *
+                          </span>
+                        </Label>
+                        <Textarea
+                          id="guidance"
+                          rows={4}
+                          required
+                          aria-required="true"
+                          value={guidance || consultation.guidance}
+                          onChange={(event) => {
+                            setGuidance(event.target.value);
+                            clear();
+                          }}
+                          placeholder="Cuidados em casa, sinais de alarme, reavaliação…"
+                          className="mt-2 rounded-xl"
+                        />
+                      </div>
+
+                      <Button type="submit" size="xl">
+                        <CheckCircle2 data-icon="inline-start" />
+                        Concluir teleconsulta
+                      </Button>
+                    </form>
+                  </section>
+                ) : null}
+
+                {isGuardian && !consultation.guidance ? (
+                  <Alert variant="info">
+                    <AlertCircle />
+                    <AlertDescription>
+                      A orientação clínica fica disponível aqui depois de o pediatra
+                      concluir a teleconsulta.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
               </div>
             </TabsContent>
           ) : null}
@@ -976,6 +1163,11 @@ export function ConsultationDetail({ id }: { id: string }) {
               />
             </TabsContent>
           ) : null}
+
+          {/* --- Percurso --- */}
+          <TabsContent value="percurso" className="mt-5">
+            <RequestTimeline consultation={consultation} />
+          </TabsContent>
         </Tabs>
       </PageShell>
 
@@ -999,26 +1191,30 @@ export function ConsultationDetail({ id }: { id: string }) {
                 value={accessReason}
                 onValueChange={(value) => setAccessReason(value as AccessReason)}
               >
-                <SelectTrigger id="access-reason" className="mt-2 h-11 w-full rounded-xl">
+                <SelectTrigger
+                  id="access-reason"
+                  className="mt-2 h-11 w-full rounded-xl"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="SUBSTITUICAO">
-                    {accessReasonLabels.SUBSTITUICAO}
-                  </SelectItem>
-                  <SelectItem value="APOIO_CLINICO">
-                    {accessReasonLabels.APOIO_CLINICO}
-                  </SelectItem>
-                  <SelectItem value="ENCAMINHAMENTO_INTERNO">
-                    {accessReasonLabels.ENCAMINHAMENTO_INTERNO}
-                  </SelectItem>
+                  {(Object.keys(accessReasonLabels) as AccessReason[]).map(
+                    (reason) => (
+                      <SelectItem key={reason} value={reason}>
+                        {accessReasonLabels[reason]}
+                      </SelectItem>
+                    ),
+                  )}
                 </SelectContent>
               </Select>
             </div>
 
             <div>
               <Label htmlFor="access-note" className="text-sm font-semibold">
-                Nota <span className="font-normal text-muted-foreground">(opcional)</span>
+                Nota{" "}
+                <span className="font-normal text-muted-foreground">
+                  (opcional)
+                </span>
               </Label>
               <Textarea
                 id="access-note"
@@ -1050,42 +1246,52 @@ export function ConsultationDetail({ id }: { id: string }) {
   );
 }
 
-/**
- * Um pedido que entrou como "Avaliação necessária" não pode ser encerrado
- * nesse estado: o pediatra atribui a classificação real ao dar o parecer.
- */
-function PriorityResolver({
-  value,
-  onChange,
+/** Mensagem de acompanhamento apresentada ao encarregado em cada estado. */
+function guardianStatusMessage(
+  status: string,
+  consultation: { assignedDoctorName: string | null; scheduledAt: string | null },
+) {
+  switch (status) {
+    case "SUBMETIDO":
+    case "AGUARDA_TRIAGEM":
+      return "O pedido foi recebido e está a aguardar triagem por um profissional de saúde do HGM.";
+    case "TRIAGEM_CONCLUIDA":
+    case "AGUARDA_ATRIBUICAO":
+      return "A triagem está concluída. O HGM está a atribuir o pedido a um pediatra.";
+    case "PEDIATRA_ATRIBUIDO":
+      return `O pedido foi atribuído a ${consultation.assignedDoctorName}. Vai receber a informação do agendamento.`;
+    case "AGUARDA_AGENDAMENTO":
+      return `${consultation.assignedDoctorName} está a definir o horário do atendimento.`;
+    case "CONSULTA_AGENDADA":
+      return `Teleconsulta marcada para ${formatDateTime(consultation.scheduledAt!)} com ${consultation.assignedDoctorName}.`;
+    case "CONSULTA_EM_CURSO":
+      return "A teleconsulta está a decorrer. Entre na consulta.";
+    case "CONSULTA_CONCLUIDA":
+      return "Consulta concluída. Consulte a orientação clínica e a prescrição no separador «Registo clínico».";
+    case "ENCAMINHADO_PRESENCIAL":
+      return "O pedido foi encaminhado para atendimento presencial. Dirija-se à unidade sanitária indicada.";
+    default:
+      return "O pedido foi cancelado.";
+  }
+}
+
+function ActionCard({
+  title,
+  description,
+  children,
 }: {
-  value: ConsultationPriority;
-  onChange: (value: ConsultationPriority) => void;
+  title: string;
+  description: string;
+  children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl bg-primary-soft/60 p-4 ring-1 ring-primary/15">
-      <Label htmlFor="final-priority" className="text-sm font-semibold">
-        Classificação após avaliação
-      </Label>
-      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-        Este pedido chegou com sintoma em texto livre e ficou em «Avaliação
-        necessária». Indique a gravidade que atribui ao caso.
+    <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+      <h2 className="font-bold tracking-tight">{title}</h2>
+      <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+        {description}
       </p>
-      <Select
-        value={value}
-        onValueChange={(next) => onChange(next as ConsultationPriority)}
-      >
-        <SelectTrigger id="final-priority" className="mt-3 h-11 w-full rounded-xl bg-background">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {resolvablePriorities.map((priority) => (
-            <SelectItem key={priority} value={priority}>
-              {priorityLabels[priority]}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
+      <div className="mt-4">{children}</div>
+    </section>
   );
 }
 

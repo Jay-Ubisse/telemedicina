@@ -1,5 +1,8 @@
 import {
   Baby,
+  Bell,
+  CalendarClock,
+  ClipboardCheck,
   ClipboardList,
   FileHeart,
   Home,
@@ -18,21 +21,34 @@ export type NavItem = {
   description: string;
 };
 
-/** "Início" e não "Dashboard" — pedido explícito nas observações do protótipo. */
+/**
+ * Menu por perfil. Cada utilizador vê apenas as funções autorizadas (§1) — e o
+ * controlo é reforçado ao nível da rota em `lib/auth/access.ts`, porque esconder
+ * o item de menu não impede escrever o URL à mão.
+ *
+ * "Início" e não "Dashboard" — pedido explícito nas observações do protótipo.
+ */
 export const navItems: NavItem[] = [
   {
     title: "Início",
     href: "/inicio",
     icon: Home,
-    roles: ["ENCARREGADO", "PEDIATRA", "ADMIN"],
+    roles: ["ENCARREGADO", "TRIAGEM", "ADMINISTRATIVO", "PEDIATRA"],
     description: "Visão geral do dia",
+  },
+  {
+    title: "Fila de triagem",
+    href: "/triagem",
+    icon: ClipboardCheck,
+    roles: ["TRIAGEM"],
+    description: "Pedidos por triar",
   },
   {
     title: "Teleconsultas",
     href: "/teleconsultas",
     icon: Stethoscope,
-    roles: ["PEDIATRA", "ADMIN"],
-    description: "Fila de triagem e agenda",
+    roles: ["TRIAGEM", "ADMINISTRATIVO", "PEDIATRA"],
+    description: "Pedidos e agenda",
   },
   {
     title: "Os meus pedidos",
@@ -49,24 +65,38 @@ export const navItems: NavItem[] = [
     description: "Educandos registados",
   },
   {
+    title: "Disponibilidade",
+    href: "/disponibilidade",
+    icon: CalendarClock,
+    roles: ["PEDIATRA", "ADMINISTRATIVO"],
+    description: "Turnos e janelas de atendimento",
+  },
+  {
     title: "Histórico clínico",
     href: "/historico-clinico",
     icon: FileHeart,
-    roles: ["ENCARREGADO", "PEDIATRA", "ADMIN"],
-    description: "Consultas encerradas",
+    roles: ["ENCARREGADO", "TRIAGEM", "ADMINISTRATIVO", "PEDIATRA"],
+    description: "Pedidos encerrados",
+  },
+  {
+    title: "Notificações",
+    href: "/notificacoes",
+    icon: Bell,
+    roles: ["ENCARREGADO", "TRIAGEM", "ADMINISTRATIVO", "PEDIATRA"],
+    description: "Notificações internas",
   },
   {
     title: "Administração",
     href: "/administracao",
     icon: Settings2,
-    roles: ["ADMIN"],
+    roles: ["ADMINISTRATIVO"],
     description: "Utilizadores e relatórios",
   },
   {
     title: "Perfil",
     href: "/perfil",
     icon: UserRound,
-    roles: ["ENCARREGADO", "PEDIATRA", "ADMIN"],
+    roles: ["ENCARREGADO", "TRIAGEM", "ADMINISTRATIVO", "PEDIATRA"],
     description: "Os seus dados",
   },
 ];

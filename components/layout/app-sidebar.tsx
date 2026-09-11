@@ -6,6 +6,7 @@ import { LifeBuoy, Smartphone } from "lucide-react";
 
 import { Logo } from "@/components/brand/logo";
 import { navItemsForRole } from "@/components/layout/nav-items";
+import { EMERGENCY_NOTICE } from "@/lib/data/symptoms";
 import type { User } from "@/lib/types/user";
 import { roleLabels } from "@/lib/types/user";
 import { cn } from "@/lib/utils";
@@ -67,15 +68,14 @@ export function SidebarContent({
           Simulador USSD
         </Link>
 
+        {/* Aviso de emergência com a redacção aprovada no relatório (§5). */}
         <div className="rounded-xl bg-primary-soft p-3.5">
           <p className="flex items-center gap-2 text-xs font-semibold text-secondary-foreground">
             <LifeBuoy className="size-3.5 text-primary" />
-            Apoio HGM
+            Emergência
           </p>
           <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-            Emergência pediátrica? Ligue{" "}
-            <span className="font-semibold text-foreground">1420</span> ou dirija-se
-            à unidade sanitária mais próxima.
+            {EMERGENCY_NOTICE}
           </p>
         </div>
       </div>

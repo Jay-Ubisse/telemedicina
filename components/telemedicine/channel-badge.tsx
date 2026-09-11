@@ -1,9 +1,16 @@
-import { Phone, Video } from "lucide-react";
+import { MessageSquare, Phone, Video } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { ConsultationChannel } from "@/lib/types/consultation";
 import { channelLabels } from "@/lib/types/consultation";
 import { cn } from "@/lib/utils";
+
+/** Modalidade de atendimento: texto, áudio ou vídeo (§8 do relatório). */
+const icons: Record<ConsultationChannel, typeof Video> = {
+  VIDEO: Video,
+  AUDIO: Phone,
+  TEXTO: MessageSquare,
+};
 
 export function ChannelBadge({
   channel,
@@ -12,7 +19,7 @@ export function ChannelBadge({
   channel: ConsultationChannel;
   className?: string;
 }) {
-  const Icon = channel === "VIDEO" ? Video : Phone;
+  const Icon = icons[channel];
 
   return (
     <Badge

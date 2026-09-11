@@ -2,19 +2,18 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  AlertCircle,
-  CheckCircle2,
-  LogOut,
-  RotateCcw,
-  Save,
-} from "lucide-react";
+import { LogOut, RotateCcw, Save } from "lucide-react";
 
+import {
+  NeighbourhoodField,
+  resolveNeighbourhood,
+  splitNeighbourhood,
+} from "@/components/forms/neighbourhood-field";
 import { AppHeader } from "@/components/layout/app-header";
+import { FeedbackAlert } from "@/components/layout/feedback-alert";
 import { PageShell } from "@/components/layout/page-shell";
 import { initialsOf } from "@/components/layout/nav-items";
 import { useSession } from "@/components/layout/session-provider";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,10 +24,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { maputoNeighbourhoods } from "@/lib/data/locations";
+import { useFeedback } from "@/lib/hooks/use-feedback";
 import { useClinicStore } from "@/lib/store/clinic-store";
 import type { Shift } from "@/lib/types/user";
-import { roleLabels, shiftLabels } from "@/lib/types/user";
+import {
+  accountStateLabels,
+  roleLabels,
+  roleResponsibilities,
+  shiftLabels,
+} from "@/lib/types/user";
 import { formatDate } from "@/lib/utils/date";
 
 export default function PerfilPage() {
@@ -39,11 +43,14 @@ export default function PerfilPage() {
   const logout = useClinicStore((state) => state.logout);
   const resetDemo = useClinicStore((state) => state.resetDemo);
 
+  const initialAddress = splitNeighbourhood(user.address);
+
   const [form, setForm] = useState({
     name: user.name,
     email: user.email,
     phone: user.phone,
-    address: user.address ?? "",
+    address: initialAddress.value,
+    addressOther: initialAddress.customValue,
     idDocument: user.idDocument ?? "",
     specialty: user.specialty ?? "",
     licenseNumber: user.licenseNumber ?? "",
@@ -51,19 +58,17 @@ export default function PerfilPage() {
     available: user.available ?? true,
     password: "",
   });
-  const [error, setError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const { feedback, showOk, showError, clear } = useFeedback();
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setError(null);
-    setFeedback(null);
+    clear();
 
     const result = updateProfile(user.id, {
       name: form.name.trim(),
       email: form.email.trim(),
       phone: form.phone.trim(),
-      address: form.address.trim(),
+      address: resolveNeighbourhood(form.address, form.addressOther),
       idDocument: form.idDocument.trim(),
       specialty: form.specialty.trim() || undefined,
       licenseNumber: form.licenseNumber.trim() || undefined,
@@ -74,12 +79,12 @@ export default function PerfilPage() {
     });
 
     if (!result.ok) {
-      setError(result.error);
+      showError(result.error);
       return;
     }
 
     setForm((current) => ({ ...current, password: "" }));
-    setFeedback("Perfil actualizado com sucesso.");
+    showOk("Perfil actualizado com sucesso.");
   }
 
   function handleReset() {
@@ -104,25 +109,14 @@ export default function PerfilPage() {
               <div>
                 <h2 className="text-lg font-extrabold tracking-tight">{user.name}</h2>
                 <p className="text-sm text-muted-foreground">
-                  {roleLabels[user.role]} · desde {formatDate(user.createdAt)}
+                  {roleLabels[user.role]} · desde {formatDate(user.createdAt)} ·
+                  conta {accountStateLabels[user.state].toLowerCase()}
                 </p>
               </div>
             </div>
 
             <div className="mt-6 space-y-4 border-t border-border pt-6">
-              {error ? (
-                <Alert variant="destructive">
-                  <AlertCircle />
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              ) : null}
-
-              {feedback ? (
-                <Alert variant="success">
-                  <CheckCircle2 />
-                  <AlertDescription>{feedback}</AlertDescription>
-                </Alert>
-              ) : null}
+              <FeedbackAlert feedback={feedback} />
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <ProfileField
@@ -157,33 +151,17 @@ export default function PerfilPage() {
                       }
                     />
                     <div className="sm:col-span-2">
-                      <Label htmlFor="profile-address" className="text-sm font-semibold">
-                        Bairro
-                      </Label>
-                      <Select
+                      <NeighbourhoodField
+                        id="profile-address"
                         value={form.address}
-                        onValueChange={(value) =>
+                        customValue={form.addressOther}
+                        onChange={(value) =>
                           setForm((c) => ({ ...c, address: value }))
                         }
-                      >
-                        <SelectTrigger
-                          id="profile-address"
-                          className="mt-2 h-11 w-full rounded-xl"
-                        >
-                          <SelectValue placeholder="Seleccione o bairro" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {maputoNeighbourhoods.map((bairro) => (
-                            <SelectItem key={bairro} value={bairro}>
-                              {bairro}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="mt-1.5 text-xs text-muted-foreground">
-                        O serviço opera na cidade de Maputo. Não é recolhida a
-                        rua nem o número de residência.
-                      </p>
+                        onCustomChange={(value) =>
+                          setForm((c) => ({ ...c, addressOther: value }))
+                        }
+                      />
                     </div>
                   </>
                 ) : (
@@ -243,7 +221,9 @@ export default function PerfilPage() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="SIM">Disponível no turno</SelectItem>
-                              <SelectItem value="NAO">Fora de turno</SelectItem>
+                              <SelectItem value="NAO">
+                                Indisponível no turno
+                              </SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -273,10 +253,19 @@ export default function PerfilPage() {
 
           <aside className="space-y-4">
             <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+              <h2 className="font-bold tracking-tight">
+                O que este perfil pode fazer
+              </h2>
+              <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                {roleResponsibilities[user.role]}
+              </p>
+            </section>
+
+            <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
               <h2 className="font-bold tracking-tight">Sessão</h2>
               <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-                Terminar sessão remove o acesso neste navegador. Os dados ficam
-                guardados localmente.
+                Terminar sessão encerra o acesso de forma segura neste navegador.
+                Os dados ficam guardados localmente.
               </p>
               <Button
                 variant="outline"

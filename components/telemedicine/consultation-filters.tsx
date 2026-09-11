@@ -12,6 +12,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  channelLabels,
+  channelOptions,
+  priorityLabels,
+  statusLabels,
+  statusOrder,
+} from "@/lib/types/consultation";
+import {
   defaultFilters,
   type ConsultationFilters,
 } from "@/lib/utils/consultations";
@@ -21,6 +28,12 @@ type Props = {
   onChange: (filters: ConsultationFilters) => void;
 };
 
+const priorities = ["CRITICA", "URGENTE", "NORMAL", "SEM_TRIAGEM"] as const;
+
+/**
+ * Barra de filtros. Os estados são apresentados exactamente na ordem da lista do
+ * §3 do relatório.
+ */
 export function ConsultationFiltersBar({ filters, onChange }: Props) {
   const dirty =
     filters.search !== "" ||
@@ -56,11 +69,11 @@ export function ConsultationFiltersBar({ filters, onChange }: Props) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="TODOS">Todos os estados</SelectItem>
-            <SelectItem value="PENDENTE">Pendente</SelectItem>
-            <SelectItem value="AGENDADA">Agendada</SelectItem>
-            <SelectItem value="EM_CURSO">Em curso</SelectItem>
-            <SelectItem value="CONCLUIDA">Concluída</SelectItem>
-            <SelectItem value="ENCAMINHADA">Encaminhada</SelectItem>
+            {statusOrder.map((status) => (
+              <SelectItem key={status} value={status}>
+                {statusLabels[status]}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
@@ -78,10 +91,11 @@ export function ConsultationFiltersBar({ filters, onChange }: Props) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="TODOS">Todas as prioridades</SelectItem>
-            <SelectItem value="CRITICA">Crítica</SelectItem>
-            <SelectItem value="URGENTE">Urgente</SelectItem>
-            <SelectItem value="AVALIACAO">Avaliação necessária</SelectItem>
-            <SelectItem value="NORMAL">Normal</SelectItem>
+            {priorities.map((priority) => (
+              <SelectItem key={priority} value={priority}>
+                {priorityLabels[priority]}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
@@ -94,13 +108,16 @@ export function ConsultationFiltersBar({ filters, onChange }: Props) {
             })
           }
         >
-          <SelectTrigger className="h-10 rounded-xl" aria-label="Canal">
-            <SelectValue placeholder="Canal" />
+          <SelectTrigger className="h-10 rounded-xl" aria-label="Modalidade">
+            <SelectValue placeholder="Modalidade" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="TODOS">Todos os canais</SelectItem>
-            <SelectItem value="VIDEO">Videochamada</SelectItem>
-            <SelectItem value="VOZ">Chamada de voz</SelectItem>
+            <SelectItem value="TODOS">Todas as modalidades</SelectItem>
+            {channelOptions.map((channel) => (
+              <SelectItem key={channel} value={channel}>
+                {channelLabels[channel]}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
 

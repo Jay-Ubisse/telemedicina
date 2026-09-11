@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { FileHeart, Hospital, History, Lock, Search } from "lucide-react";
+import { FileHeart, History, Hospital, Lock, Search, Trash2 } from "lucide-react";
 
 import { StatCard } from "@/components/dashboard/stat-card";
 import { AppHeader } from "@/components/layout/app-header";
@@ -14,7 +14,8 @@ import { StatusBadge } from "@/components/telemedicine/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { accessLevelFor, maskConsultation } from "@/lib/auth/access";
+import { accessLevelFor, isOwnRequest, maskConsultation } from "@/lib/auth/access";
+import { closedStatuses } from "@/lib/types/consultation";
 import { useClinicStore } from "@/lib/store/clinic-store";
 import { sortByCreatedDesc } from "@/lib/utils/consultations";
 import { describeAgeYears, formatDateTime } from "@/lib/utils/date";
@@ -28,9 +29,7 @@ export default function HistoricoClinicoPage() {
 
   const history = useMemo(() => {
     const owned = isGuardian
-      ? consultations.filter(
-          (item) => item.guardianId === user.id || item.phone === user.phone,
-        )
+      ? consultations.filter((item) => isOwnRequest(user, item))
       : consultations;
 
     // O histórico segue as mesmas regras de visibilidade do resto da
@@ -39,9 +38,9 @@ export default function HistoricoClinicoPage() {
       maskConsultation(item, accessLevelFor(user, item)),
     );
 
-    const closed = scoped.filter(
-      (item) => item.status === "CONCLUIDA" || item.status === "ENCAMINHADA",
-    );
+    // O histórico reúne os pedidos encerrados: consultas concluídas,
+    // encaminhamentos para atendimento presencial e pedidos cancelados.
+    const closed = scoped.filter((item) => closedStatuses.includes(item.status));
 
     const term = search.trim().toLowerCase();
     const filtered =
@@ -59,8 +58,13 @@ export default function HistoricoClinicoPage() {
     return sortByCreatedDesc(filtered);
   }, [consultations, isGuardian, user, search]);
 
-  const completed = history.filter((item) => item.status === "CONCLUIDA").length;
-  const referred = history.filter((item) => item.status === "ENCAMINHADA").length;
+  const completed = history.filter(
+    (item) => item.status === "CONSULTA_CONCLUIDA",
+  ).length;
+  const referred = history.filter(
+    (item) => item.status === "ENCAMINHADO_PRESENCIAL",
+  ).length;
+  const cancelled = history.filter((item) => item.status === "CANCELADO").length;
 
   return (
     <>
@@ -70,7 +74,7 @@ export default function HistoricoClinicoPage() {
         subtitle={
           isGuardian
             ? "Consultas encerradas e orientações recebidas."
-            : "Registo das teleconsultas concluídas e dos casos encaminhados."
+            : "Registo dos pedidos encerrados: consultas concluídas, encaminhamentos presenciais e cancelamentos."
         }
       />
 
@@ -80,14 +84,14 @@ export default function HistoricoClinicoPage() {
             <Lock />
             <AlertTitle>Acesso ao conteúdo clínico</AlertTitle>
             <AlertDescription>
-              {user.role === "ADMIN"
-                ? "O perfil de administração vê a actividade do serviço; as notas clínicas e a orientação pertencem ao processo do profissional que acompanhou o caso."
+              {user.role === "ADMINISTRATIVO"
+                ? "O perfil administrativo vê a actividade do serviço; as notas clínicas, a orientação e as prescrições pertencem ao processo do profissional que acompanhou o caso."
                 : "As notas clínicas e a orientação são apresentadas nas teleconsultas que acompanhou. Nos casos de colegas vê apenas o resumo, salvo acesso justificado no próprio pedido."}
             </AlertDescription>
           </Alert>
         ) : null}
 
-        <section className="grid gap-4 sm:grid-cols-3">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Total no histórico"
             value={history.length}
@@ -101,11 +105,12 @@ export default function HistoricoClinicoPage() {
             tone="success"
           />
           <StatCard
-            label="Encaminhadas"
+            label="Encaminhados"
             value={referred}
             icon={Hospital}
             tone="danger"
           />
+          <StatCard label="Cancelados" value={cancelled} icon={Trash2} />
         </section>
 
         <div className="relative max-w-md">
@@ -124,7 +129,7 @@ export default function HistoricoClinicoPage() {
             <EmptyState
               icon={<FileHeart className="size-5" />}
               title="Ainda não há registos"
-              description="As teleconsultas concluídas e os casos encaminhados aparecem aqui."
+              description="Os pedidos encerrados — consultas concluídas, encaminhamentos e cancelamentos — aparecem aqui."
             />
           </div>
         ) : (
@@ -172,14 +177,18 @@ export default function HistoricoClinicoPage() {
 
                   <div>
                     <dt className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
-                      {item.status === "ENCAMINHADA"
+                      {item.status === "ENCAMINHADO_PRESENCIAL"
                         ? "Motivo do encaminhamento"
-                        : "Notas clínicas"}
+                        : item.status === "CANCELADO"
+                          ? "Motivo do cancelamento"
+                          : "Notas clínicas"}
                     </dt>
                     <dd className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-                      {(item.status === "ENCAMINHADA"
+                      {(item.status === "ENCAMINHADO_PRESENCIAL"
                         ? item.referralReason
-                        : item.clinicalNotes) ||
+                        : item.status === "CANCELADO"
+                          ? item.cancelReason
+                          : item.clinicalNotes) ||
                         (isGuardian ? "Sem registo." : "Reservado ao processo clínico.")}
                     </dd>
                   </div>
