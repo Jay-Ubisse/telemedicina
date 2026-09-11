@@ -15,9 +15,9 @@ import { maskPhone } from "@/lib/auth/access";
 /**
  * Recuperação de palavra-passe.
  *
- * No protótipo não há envio real de SMS nem de email: o ecrã confirma o canal
- * pelo qual o código seria enviado e diz sempre a mesma coisa, exista ou não a
- * conta — não revelar que endereços estão registados é a prática correcta.
+ * No protótipo não há envio real de mensagens: a confirmação é uma notificação
+ * simulada, e o ecrã diz sempre a mesma coisa, exista ou não a conta — não
+ * revelar que endereços estão registados é a prática correcta.
  */
 export function RecoverView() {
   const users = useClinicStore((state) => state.users);
@@ -45,12 +45,12 @@ export function RecoverView() {
     <AuthLayout
       eyebrow="Recuperar acesso"
       title="Esqueceu-se da palavra-passe?"
-      description="Indique o email da conta. Enviamos um código de recuperação por SMS para o número registado."
+      description="Indique o email da conta. O código de recuperação é apresentado como notificação simulada para o número registado."
       aside={
-        <p className="text-center text-[0.625rem] tracking-[0.14em] text-ink-muted font-semibold uppercase">
+        <p className="text-center text-xs text-ink-muted">
           <Smartphone className="mr-1.5 inline size-3" />
-          Sem acesso ao número? Contacte o HGM pelo{" "}
-          <span className="text-primary">1420</span>
+          Sem acesso ao número registado? Peça à administração do HGM para
+          actualizar o contacto da conta.
         </p>
       }
     >
@@ -58,20 +58,21 @@ export function RecoverView() {
         <div className="space-y-5">
           <Alert variant="success">
             <CheckCircle2 />
-            <AlertTitle>Código enviado</AlertTitle>
+            <AlertTitle>Código gerado</AlertTitle>
             <AlertDescription>
-              Se existir uma conta associada a <strong>{email.trim()}</strong>,
-              enviámos um código de recuperação por SMS para {sentTo}. O código
-              é válido durante 15 minutos.
+              Se existir uma conta associada a <strong>{email.trim()}</strong>, foi
+              gerado um código de recuperação para o número {sentTo}, apresentado
+              como notificação simulada. O código é válido durante 15 minutos.
             </AlertDescription>
           </Alert>
 
           <Alert variant="info">
             <AlertCircle />
             <AlertDescription>
-              Nesta pré-visualização não há envio real de SMS. A palavra-passe
-              das contas de demonstração é <strong>demo1234</strong>; as contas
-              criadas pela administração são repostas na área de Administração.
+              Nesta pré-visualização não existe qualquer envio externo de
+              mensagens. A palavra-passe das contas de demonstração é{" "}
+              <strong>demo1234</strong>; as contas criadas pela administração são
+              repostas na área de Administração.
             </AlertDescription>
           </Alert>
 
@@ -114,7 +115,7 @@ export function RecoverView() {
           </div>
 
           <Button type="submit" size="xl" className="w-full rounded-lg">
-            Enviar código por SMS
+            Gerar código de recuperação
             <ArrowRight data-icon="inline-end" />
           </Button>
 

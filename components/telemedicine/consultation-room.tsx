@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { useLocalMedia } from "@/lib/hooks/use-local-media";
 import { useClinicStore } from "@/lib/store/clinic-store";
 import type { Consultation } from "@/lib/types/consultation";
+import { channelLabels, closedStatuses } from "@/lib/types/consultation";
 import type { User } from "@/lib/types/user";
 import { isMeetingLinkValid } from "@/lib/utils/consultations";
 import { formatTime } from "@/lib/utils/date";
@@ -82,12 +83,15 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [consultation.messages.length]);
 
-  const isDoctor = viewer.role === "PEDIATRA" || viewer.role === "ADMIN";
+  const isDoctor = viewer.role === "PEDIATRA";
   const doctorName = consultation.assignedDoctorName ?? "Pediatra por atribuir";
   const remoteName = isDoctor ? consultation.guardianName : doctorName;
   const linkValid = isMeetingLinkValid(consultation);
-  // Só a videochamada depende do link; a chamada de voz não.
-  const blocked = consultation.channel === "VIDEO" && !linkValid;
+  // Só a videochamada depende do acesso com prazo; áudio e texto não.
+  // Sem consentimento do encarregado, a sala não abre (§4 do relatório).
+  const blocked =
+    (consultation.channel === "VIDEO" && !linkValid) ||
+    !consultation.consentGivenAt;
 
   function handleSend(event: React.FormEvent) {
     event.preventDefault();
@@ -156,21 +160,19 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
               <div>
                 <p className="font-semibold text-white">{remoteName}</p>
                 <p className="mt-1 text-sm text-white/60">
-                  {consultation.channel === "VIDEO"
-                    ? "Videochamada pronta a iniciar"
-                    : "Chamada de voz pronta a iniciar"}
+                  {channelLabels[consultation.channel]} · pronta a iniciar
                 </p>
               </div>
 
               {blocked ? (
                 <>
                   <span className="mt-1 rounded-full bg-destructive/20 px-3 py-1.5 text-xs font-bold tracking-wide text-destructive uppercase">
-                    Link expirado
+                    Acesso expirado
                   </span>
                   <p className="max-w-xs text-xs leading-relaxed text-white/60">
                     A entrada nesta sala está bloqueada. O pediatra responsável
-                    tem de reenviar o link por SMS, o que gera um novo prazo de
-                    acesso.
+                    tem de disponibilizar um novo acesso, o que gera um novo
+                    prazo de entrada.
                   </p>
                 </>
               ) : (
@@ -180,7 +182,7 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
                     className="mt-1"
                     onClick={handleJoin}
                     disabled={
-                      consultation.status === "CONCLUIDA" ||
+                      closedStatuses.includes(consultation.status) ||
                       media.status === "requesting"
                     }
                   >
@@ -202,6 +204,15 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
                     arranca automaticamente. O navegador vai pedir autorização
                     para usar {wantsVideo ? "a câmara e o microfone" : "o microfone"}{" "}
                     deste dispositivo.
+                  </p>
+
+                  {/* Consentimento e ausência de gravação (§4 do relatório) */}
+                  <p className="max-w-xs rounded-lg bg-white/8 px-3 py-2 text-xs leading-relaxed text-white/70">
+                    {consultation.consentGivenAt
+                      ? "Consentimento do encarregado de educação registado no pedido."
+                      : "Falta o consentimento do encarregado de educação para esta teleconsulta."}{" "}
+                    Esta consulta <strong className="font-semibold">não é gravada</strong>:
+                    não há gravação automática de imagem nem de som.
                   </p>
 
                   {media.message ? (
@@ -253,11 +264,16 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
               ) : null}
 
               <div className="absolute top-4 left-4 flex items-center gap-2 rounded-full bg-black/45 px-3 py-1.5 backdrop-blur">
-                <span className="size-2 animate-pulse rounded-full bg-destructive" />
+                <span className="size-2 animate-pulse rounded-full bg-success" />
                 <span className="text-xs font-semibold text-white tabular-nums">
                   {minutes}:{seconds}
                 </span>
               </div>
+
+              {/* Nunca há gravação automática: dizê-lo no próprio ecrã. */}
+              <span className="absolute top-4 right-4 rounded-full bg-black/45 px-3 py-1.5 text-[0.625rem] font-semibold tracking-[0.1em] text-white/80 uppercase backdrop-blur">
+                Sem gravação
+              </span>
             </>
           )}
         </div>
@@ -320,8 +336,8 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
                       media.cameraLabel ? ` (${media.cameraLabel})` : ""
                     } activa na auto-visualização.`
                   : "Microfone deste dispositivo activo."}{" "}
-                A imagem não é transmitida — o outro participante é simulado.
-                Encerrar liberta a câmara e o microfone.
+                A imagem não é transmitida — o outro participante é simulado. A
+                consulta não é gravada. Encerrar liberta a câmara e o microfone.
               </p>
             )}
           </div>
@@ -394,8 +410,9 @@ export function ConsultationRoom({ consultation, viewer, onEnded }: Props) {
             <Alert variant="warning" className="mb-2">
               <Link2 />
               <AlertDescription>
-                O link da videochamada expirou. O pediatra responsável pode
-                reenviá-lo por SMS para abrir um novo prazo de acesso.
+                O acesso à sala expirou. O pediatra responsável pode
+                disponibilizar um novo acesso para abrir um novo prazo de
+                entrada.
               </AlertDescription>
             </Alert>
           ) : null}

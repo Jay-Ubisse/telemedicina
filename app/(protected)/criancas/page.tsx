@@ -7,7 +7,6 @@ import {
   Archive,
   ArchiveRestore,
   Baby,
-  CheckCircle2,
   Info,
   Pencil,
   Plus,
@@ -16,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { AppHeader } from "@/components/layout/app-header";
+import { FeedbackAlert } from "@/components/layout/feedback-alert";
 import { EmptyState, PageShell } from "@/components/layout/page-shell";
 import { useSession } from "@/components/layout/session-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { MAX_AGE_YEARS } from "@/lib/data/symptoms";
+import { useFeedback } from "@/lib/hooks/use-feedback";
 import { useClinicStore } from "@/lib/store/clinic-store";
 import type { Child } from "@/lib/types/user";
 import { openStatuses } from "@/lib/types/consultation";
@@ -66,13 +67,19 @@ export default function CriancasPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Child | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
+  /** Erro do formulário, mostrado dentro da caixa de diálogo. */
   const [error, setError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  /**
+   * Mensagens da página. Desaparecem sozinhas e são descartadas assim que o
+   * utilizador volta a agir (§12 do relatório).
+   */
+  const { feedback, showOk, showError, clear } = useFeedback();
 
   function openCreate() {
     setEditing(null);
     setForm(emptyForm);
     setError(null);
+    clear();
     setDialogOpen(true);
   }
 
@@ -85,6 +92,7 @@ export default function CriancasPage() {
       notes: child.notes ?? "",
     });
     setError(null);
+    clear();
     setDialogOpen(true);
   }
 
@@ -113,10 +121,10 @@ export default function CriancasPage() {
       return;
     }
 
-    setFeedback(
+    showOk(
       editing
         ? `Dados de ${payload.name} actualizados.`
-        : `${payload.name} foi cadastrado(a) com sucesso.`,
+        : `${payload.name} foi registado(a) com sucesso.`,
     );
     setDialogOpen(false);
     setForm(emptyForm);
@@ -129,37 +137,32 @@ export default function CriancasPage() {
    * nunca é apagado.
    */
   function handleRemove(child: Child) {
-    setError(null);
     const result = removeChild(child.id);
 
     if (!result.ok) {
-      setFeedback(null);
-      setError(result.error);
+      showError(result.error);
       return;
     }
 
-    setFeedback(`${child.name} foi eliminado(a) do registo.`);
+    showOk(`${child.name} foi eliminado(a) do registo.`);
   }
 
   function handleArchive(child: Child) {
-    setError(null);
     const result = archiveChild(child.id);
 
     if (!result.ok) {
-      setFeedback(null);
-      setError(result.error);
+      showError(result.error);
       return;
     }
 
-    setFeedback(
+    showOk(
       `${child.name} foi arquivado(a). O histórico clínico continua guardado.`,
     );
   }
 
   function handleRestore(child: Child) {
-    setError(null);
     const result = restoreChild(child.id);
-    if (result.ok) setFeedback(`${child.name} voltou à lista activa.`);
+    if (result.ok) showOk(`${child.name} voltou à lista activa.`);
   }
 
   return (
@@ -171,36 +174,24 @@ export default function CriancasPage() {
         actions={
           <Button size="lg" onClick={openCreate}>
             <Plus data-icon="inline-start" />
-            <span className="hidden sm:inline">Cadastrar criança</span>
+            <span className="hidden sm:inline">Registar criança</span>
           </Button>
         }
       />
 
       <PageShell>
-        {feedback ? (
-          <Alert variant="success">
-            <CheckCircle2 />
-            <AlertDescription>{feedback}</AlertDescription>
-          </Alert>
-        ) : null}
-
-        {error && !dialogOpen ? (
-          <Alert variant="destructive">
-            <AlertCircle />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        ) : null}
+        <FeedbackAlert feedback={feedback} />
 
         {children.length === 0 ? (
           <div className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
             <EmptyState
               icon={<Baby className="size-5" />}
               title="Nenhuma criança registada"
-              description={`Cadastre os seus educandos (0 aos ${MAX_AGE_YEARS} anos) para poder solicitar teleconsultas.`}
+              description={`Registe os seus educandos (0 aos ${MAX_AGE_YEARS} anos) para poder solicitar teleconsultas.`}
               action={
                 <Button size="lg" onClick={openCreate}>
                   <Plus data-icon="inline-start" />
-                  Cadastrar criança
+                  Registar criança
                 </Button>
               }
             />
@@ -368,7 +359,7 @@ export default function CriancasPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {editing ? "Editar criança" : "Cadastrar criança"}
+              {editing ? "Editar criança" : "Registar criança"}
             </DialogTitle>
             <DialogDescription>
               O serviço é exclusivo para crianças dos 0 aos {MAX_AGE_YEARS} anos.
@@ -394,9 +385,10 @@ export default function CriancasPage() {
                 aria-required="true"
                 minLength={3}
                 value={form.name}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, name: event.target.value }))
-                }
+                onChange={(event) => {
+                  setForm((current) => ({ ...current, name: event.target.value }));
+                  setError(null);
+                }}
                 placeholder="Tiago Mondlane"
                 className="mt-2 h-11 rounded-xl px-3.5"
               />

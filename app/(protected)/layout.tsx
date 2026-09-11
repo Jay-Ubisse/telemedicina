@@ -10,18 +10,34 @@ import { SessionProvider } from "@/components/layout/session-provider";
 import { Button } from "@/components/ui/button";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { canAccessRoute } from "@/lib/auth/access";
+import { useClinicStore } from "@/lib/store/clinic-store";
 import { useCurrentUser } from "@/lib/store/selectors";
-import { roleLabels } from "@/lib/types/user";
+import { accountStateLabels, roleLabels } from "@/lib/types/user";
+import { canSignIn } from "@/lib/types/user";
 
 export default function ProtectedLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const hydrated = useHydrated();
   const user = useCurrentUser();
+  const logout = useClinicStore((state) => state.logout);
+
+  /**
+   * Sessão aberta não é passe vitalício: se a conta deixar de poder iniciar
+   * sessão — foi desactivada, bloqueada ou voltou a provisória — a sessão é
+   * encerrada de imediato. Era esta a falha do §12 do relatório, em que uma conta
+   * marcada como inactiva continuava dentro da plataforma.
+   */
+  const blocked = Boolean(user) && !canSignIn(user!);
 
   useEffect(() => {
-    if (hydrated && !user) router.replace("/login");
-  }, [hydrated, user, router]);
+    if (!hydrated) return;
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+    if (blocked) logout();
+  }, [hydrated, user, blocked, logout, router]);
 
   if (!hydrated || !user) {
     return (
@@ -34,8 +50,17 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
     );
   }
 
-  // Controlo de acesso por perfil também nas rotas: esconder o item de menu
-  // não chega, porque o URL continua a ser escrito à mão.
+  if (blocked) {
+    return (
+      <Blocked
+        title="Esta conta não tem acesso à plataforma"
+        description={`O estado actual da conta é «${accountStateLabels[user.state]}». Contas inactivas, bloqueadas ou provisórias não podem utilizar a plataforma. Contacte a administração do HGM.`}
+      />
+    );
+  }
+
+  // Controlo de acesso por perfil também nas rotas: esconder o item de menu não
+  // chega, porque o URL continua a ser escrito à mão.
   const allowed = canAccessRoute(user.role, pathname);
 
   return (
@@ -44,7 +69,14 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
         <AppSidebar user={user} />
         <div className="min-h-screen lg:pl-64">
           <main className="min-w-0">
-            {allowed ? children : <Unauthorized role={roleLabels[user.role]} />}
+            {allowed ? (
+              children
+            ) : (
+              <Blocked
+                title="Acesso não autorizado"
+                description={`Esta área não faz parte do perfil ${roleLabels[user.role]}. Se precisa de aceder a estes dados, contacte a administração do HGM — os acessos fora do perfil ficam registados para auditoria.`}
+              />
+            )}
           </main>
         </div>
       </div>
@@ -52,7 +84,13 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
   );
 }
 
-function Unauthorized({ role }: { role: string }) {
+function Blocked({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
   return (
     <div className="flex min-h-screen items-center justify-center px-5 py-16">
       <div className="w-full max-w-md rounded-2xl bg-card p-8 text-center ring-1 ring-foreground/8">
@@ -60,18 +98,19 @@ function Unauthorized({ role }: { role: string }) {
           <ShieldAlert className="size-6" />
         </span>
 
-        <h1 className="mt-5 text-xl font-extrabold tracking-tight">
-          Acesso não autorizado
-        </h1>
+        <h1 className="mt-5 text-xl font-extrabold tracking-tight">{title}</h1>
         <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-          Esta área não faz parte do perfil <strong>{role}</strong>. Se precisa
-          de aceder a estes dados, contacte a administração do HGM — os acessos
-          fora do perfil ficam registados para auditoria.
+          {description}
         </p>
 
-        <Button asChild size="lg" className="mt-6 w-full">
-          <Link href="/inicio">Voltar ao início</Link>
-        </Button>
+        <div className="mt-6 flex flex-col gap-2.5">
+          <Button asChild size="lg">
+            <Link href="/inicio">Voltar ao início</Link>
+          </Button>
+          <Button asChild variant="outline" size="lg">
+            <Link href="/login">Entrar com outra conta</Link>
+          </Button>
+        </div>
       </div>
     </div>
   );

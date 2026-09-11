@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogOut, Menu, UserRound } from "lucide-react";
+import { Bell, LogOut, UserRound, Menu } from "lucide-react";
 
 import { SidebarContent } from "@/components/layout/app-sidebar";
 import { initialsOf } from "@/components/layout/nav-items";
@@ -25,6 +25,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useClinicStore } from "@/lib/store/clinic-store";
+import { useUnreadNotificationCount } from "@/lib/store/selectors";
 import type { User } from "@/lib/types/user";
 import { roleLabels } from "@/lib/types/user";
 import { useState } from "react";
@@ -39,6 +40,7 @@ type AppHeaderProps = {
 export function AppHeader({ user, title, subtitle, actions }: AppHeaderProps) {
   const router = useRouter();
   const logout = useClinicStore((state) => state.logout);
+  const unread = useUnreadNotificationCount(user.id);
   const [menuOpen, setMenuOpen] = useState(false);
 
   function handleLogout() {
@@ -80,6 +82,28 @@ export function AppHeader({ user, title, subtitle, actions }: AppHeaderProps) {
 
         <div className="flex shrink-0 items-center gap-2">
           {actions}
+
+          {/* Notificações internas (§9 do relatório) */}
+          <Button
+            asChild
+            variant="outline"
+            size="icon-lg"
+            className="relative"
+            aria-label={
+              unread > 0
+                ? `Notificações (${unread} não lidas)`
+                : "Notificações"
+            }
+          >
+            <Link href="/notificacoes">
+              <Bell />
+              {unread > 0 ? (
+                <span className="absolute -top-1 -right-1 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] font-bold text-primary-foreground tabular-nums">
+                  {unread > 9 ? "9+" : unread}
+                </span>
+              ) : null}
+            </Link>
+          </Button>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

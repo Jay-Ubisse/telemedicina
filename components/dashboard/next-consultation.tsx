@@ -30,7 +30,7 @@ export function NextConsultation({
     : null;
 
   const countdown =
-    consultation.status === "EM_CURSO"
+    consultation.status === "CONSULTA_EM_CURSO"
       ? "A decorrer agora"
       : minutes === null
         ? "Sem horário definido"
@@ -95,8 +95,8 @@ export function NextConsultation({
               <Link2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
               <dd className="text-muted-foreground">
                 {linkValid
-                  ? "Link da sala activo e enviado por SMS"
-                  : "Link ainda não gerado ou já expirado"}
+                  ? "Acesso à sala activo (notificação simulada)"
+                  : "Acesso à sala ainda não gerado ou já expirado"}
               </dd>
             </div>
           ) : null}
@@ -105,7 +105,7 @@ export function NextConsultation({
         <Button asChild size="lg" className="w-full">
           <Link href={`/teleconsultas/${consultation.id}`}>
             <Video data-icon="inline-start" />
-            {consultation.status === "EM_CURSO"
+            {consultation.status === "CONSULTA_EM_CURSO"
               ? "Entrar na sala"
               : "Abrir teleconsulta"}
           </Link>

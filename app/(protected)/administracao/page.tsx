@@ -2,24 +2,25 @@
 
 import { useMemo, useState } from "react";
 import {
-  AlertCircle,
+  Activity,
+  CalendarCheck2,
   CheckCircle2,
+  ClipboardCheck,
   Download,
+  FileSpreadsheet,
+  Inbox,
   Info,
+  KeyRound,
   Pencil,
   Plus,
   Search,
-  ShieldOff,
   ShieldCheck,
+  ShieldOff,
+  Smartphone,
+  Trash2,
+  UserCheck,
   Users,
   Video,
-  Smartphone,
-  Activity,
-  CalendarCheck2,
-  FileSpreadsheet,
-  Inbox,
-  Stethoscope,
-  Trash2,
 } from "lucide-react";
 
 import { BreakdownBars } from "@/components/dashboard/breakdown-bars";
@@ -30,9 +31,16 @@ import {
 } from "@/components/dashboard/clinic-charts";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { AppHeader } from "@/components/layout/app-header";
+import { FeedbackAlert } from "@/components/layout/feedback-alert";
 import { EmptyState, PageShell } from "@/components/layout/page-shell";
 import { initialsOf } from "@/components/layout/nav-items";
 import { useSession } from "@/components/layout/session-provider";
+import {
+  NeighbourhoodField,
+  resolveNeighbourhood,
+  splitNeighbourhood,
+} from "@/components/forms/neighbourhood-field";
+import { AvailabilityBadge } from "@/components/telemedicine/availability-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -68,20 +76,24 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useFeedback } from "@/lib/hooks/use-feedback";
 import { useClinicStore } from "@/lib/store/clinic-store";
+import { useAvailability, usePediatricians } from "@/lib/store/selectors";
 import type { ConsultationChannel } from "@/lib/types/consultation";
 import {
   channelLabels,
   priorityLabels,
   statusLabels,
 } from "@/lib/types/consultation";
-import type { Shift, User, UserRole } from "@/lib/types/user";
+import type { AccountState, Shift, User, UserRole } from "@/lib/types/user";
 import {
+  accountStateLabels,
   roleLabels,
   shiftLabels,
   shortRoleLabels,
   shortShiftLabels,
 } from "@/lib/types/user";
+import { rankDoctorsByAvailability } from "@/lib/utils/availability";
 import { getChannelBreakdown, getMetrics } from "@/lib/utils/consultations";
 import { downloadCsv, toCsv } from "@/lib/utils/csv";
 import { downloadExcel, toExcelWorkbook, type Sheet } from "@/lib/utils/excel";
@@ -99,11 +111,13 @@ type UserForm = {
   shift: Shift | "";
   available: boolean;
   address: string;
+  addressOther: string;
 };
 
 const channelBarColors: Record<ConsultationChannel, string> = {
   VIDEO: "bg-primary",
-  VOZ: "bg-accent",
+  AUDIO: "bg-accent",
+  TEXTO: "bg-success",
 };
 
 const emptyUserForm: UserForm = {
@@ -117,16 +131,28 @@ const emptyUserForm: UserForm = {
   shift: "",
   available: true,
   address: "",
+  addressOther: "",
 };
 
 /** Especialidades sugeridas para a escala de pediatria do HGM. */
 const specialtySuggestions = [
   "Pediatria Geral",
   "Pediatria e Neonatologia",
-  "Urgência / Triagem Pediátrica",
+  "Urgência pediátrica",
   "Seguimento de casos não urgentes",
+  "Enfermagem pediátrica · triagem",
 ];
 
+const assignableStates: AccountState[] = ["ACTIVA", "INACTIVA", "BLOQUEADA"];
+
+/**
+ * Administração.
+ *
+ * Inclui a activação das contas provisórias criadas por pedidos USSD (§11 do
+ * relatório): é uma operação própria, que cria de facto as credenciais e mantém os
+ * pedidos associados ao encarregado — não bastava alterar o email e a
+ * palavra-passe, como o protótipo testado mostrava.
+ */
 export default function AdministracaoPage() {
   const user = useSession();
 
@@ -135,26 +161,48 @@ export default function AdministracaoPage() {
   const consultations = useClinicStore((state) => state.consultations);
   const createUser = useClinicStore((state) => state.createUser);
   const updateUser = useClinicStore((state) => state.updateUser);
-  const setUserActive = useClinicStore((state) => state.setUserActive);
+  const setUserState = useClinicStore((state) => state.setUserState);
   const removeUser = useClinicStore((state) => state.removeUser);
+  const activateProvisionalAccount = useClinicStore(
+    (state) => state.activateProvisionalAccount,
+  );
+
+  const pediatricians = usePediatricians();
+  const availability = useAvailability();
+
+  const { feedback, report, showOk } = useFeedback();
 
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [form, setForm] = useState<UserForm>(emptyUserForm);
   const [error, setError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const [pageError, setPageError] = useState<string | null>(null);
 
-  const pediatricians = useMemo(
+  // Activação de conta provisória
+  const [activateTarget, setActivateTarget] = useState<User | null>(null);
+  const [activateForm, setActivateForm] = useState({
+    email: "",
+    password: "",
+    name: "",
+    idDocument: "",
+  });
+  const [activateError, setActivateError] = useState<string | null>(null);
+
+  const allPediatricians = useMemo(
     () => users.filter((item) => item.role === "PEDIATRA"),
+    [users],
+  );
+  const provisionalAccounts = useMemo(
+    () => users.filter((item) => item.state === "PROVISORIA"),
     [users],
   );
 
   const metrics = useMemo(() => getMetrics(consultations), [consultations]);
+  const ranked = useMemo(
+    () => rankDoctorsByAvailability(pediatricians, availability),
+    [pediatricians, availability],
+  );
 
-  // Os gráficos derivam dos pedidos reais, por isso actualizam-se sozinhos
-  // sempre que a lista de consultas muda.
   const channelBreakdown = useMemo(
     () =>
       getChannelBreakdown(consultations).map((entry) => ({
@@ -186,6 +234,7 @@ export default function AdministracaoPage() {
   }
 
   function openEdit(target: User) {
+    const address = splitNeighbourhood(target.address);
     setEditing(target);
     setForm({
       name: target.name,
@@ -197,10 +246,22 @@ export default function AdministracaoPage() {
       licenseNumber: target.licenseNumber ?? "",
       shift: target.shift ?? "",
       available: target.available ?? true,
-      address: target.address ?? "",
+      address: address.value,
+      addressOther: address.customValue,
     });
     setError(null);
     setDialogOpen(true);
+  }
+
+  function openActivate(target: User) {
+    setActivateTarget(target);
+    setActivateForm({
+      email: "",
+      password: "",
+      name: target.name,
+      idDocument: target.idDocument ?? "",
+    });
+    setActivateError(null);
   }
 
   function handleSubmit(event: React.FormEvent) {
@@ -240,6 +301,8 @@ export default function AdministracaoPage() {
       }
     }
 
+    const address = resolveNeighbourhood(form.address, form.addressOther);
+
     const result = editing
       ? updateUser(editing.id, {
           name: form.name.trim(),
@@ -251,7 +314,7 @@ export default function AdministracaoPage() {
           licenseNumber: form.licenseNumber.trim() || undefined,
           shift: form.role === "PEDIATRA" ? (form.shift as Shift) : undefined,
           available: form.role === "PEDIATRA" ? form.available : undefined,
-          address: form.address.trim() || undefined,
+          address: address || undefined,
         })
       : createUser({
           name: form.name,
@@ -263,7 +326,7 @@ export default function AdministracaoPage() {
           licenseNumber: form.licenseNumber,
           shift: form.role === "PEDIATRA" ? (form.shift as Shift) : undefined,
           available: form.available,
-          address: form.address,
+          address,
         });
 
     if (!result.ok) {
@@ -271,7 +334,7 @@ export default function AdministracaoPage() {
       return;
     }
 
-    setFeedback(
+    showOk(
       editing
         ? `Utilizador ${form.name} actualizado.`
         : `Utilizador ${form.name} criado com sucesso.`,
@@ -281,9 +344,27 @@ export default function AdministracaoPage() {
     setForm(emptyUserForm);
   }
 
+  function handleActivate(event: React.FormEvent) {
+    event.preventDefault();
+    if (!activateTarget) return;
+
+    const result = activateProvisionalAccount(activateTarget.id, activateForm);
+
+    if (!result.ok) {
+      setActivateError(result.error);
+      return;
+    }
+
+    setActivateTarget(null);
+    setActivateError(null);
+    showOk(
+      `Conta de ${result.data.name} activada. As credenciais definidas já permitem iniciar sessão e os pedidos USSD continuam associados a este encarregado.`,
+    );
+  }
+
   /**
-   * Linhas usadas tanto no CSV como no livro Excel — uma só definição das
-   * colunas evita que os dois ficheiros divirjam.
+   * Linhas usadas tanto no CSV como no livro Excel — uma só definição das colunas
+   * evita que os dois ficheiros divirjam.
    */
   const consultationRows = useMemo(
     () =>
@@ -300,10 +381,12 @@ export default function AdministracaoPage() {
         Estado: statusLabels[item.status],
         Origem: item.source,
         Submetido: formatDateTime(item.createdAt),
-        Agendado: item.scheduledAt ? formatDateTime(item.scheduledAt) : "",
+        Triagem: item.triageProfessionalName ?? "",
+        TriadoEm: item.triagedAt ? formatDateTime(item.triagedAt) : "",
         Pediatra: item.assignedDoctorName ?? "",
-        Orientacao: item.guidance,
-        Encaminhamento: item.referralReason,
+        Agendado: item.scheduledAt ? formatDateTime(item.scheduledAt) : "",
+        DuracaoMin: item.durationMinutes ?? "",
+        Prescricoes: item.prescriptions.length,
       })),
     [consultations],
   );
@@ -320,10 +403,26 @@ export default function AdministracaoPage() {
         Turno: item.shift ? shiftLabels[item.shift] : "",
         Disponivel:
           item.role === "PEDIATRA" ? (item.available ? "Sim" : "Não") : "",
-        Estado: item.active ? "Activo" : "Inactivo",
+        Estado: accountStateLabels[item.state],
         Criado: formatDate(item.createdAt),
       })),
     [users],
+  );
+
+  const availabilityRows = useMemo(
+    () =>
+      availability.map((entry) => ({
+        Pediatra: entry.doctorName,
+        Dia: entry.date,
+        Inicio: entry.startTime,
+        Fim: entry.endTime,
+        DuracaoMin: entry.durationMinutes,
+        Modalidade: channelLabels[entry.modality],
+        Tipo: entry.kind,
+        Estado: entry.state,
+        Observacoes: entry.notes,
+      })),
+    [availability],
   );
 
   function exportConsultationsCsv() {
@@ -331,7 +430,7 @@ export default function AdministracaoPage() {
       `hgm-teleconsultas-${new Date().toISOString().slice(0, 10)}.csv`,
       toCsv(consultationRows),
     );
-    setFeedback(`Exportadas ${consultationRows.length} teleconsultas para CSV.`);
+    showOk(`Exportados ${consultationRows.length} pedidos para CSV.`);
   }
 
   function exportUsers() {
@@ -339,10 +438,10 @@ export default function AdministracaoPage() {
       `hgm-utilizadores-${new Date().toISOString().slice(0, 10)}.csv`,
       toCsv(userRows),
     );
-    setFeedback(`Exportados ${userRows.length} utilizadores para CSV.`);
+    showOk(`Exportados ${userRows.length} utilizadores para CSV.`);
   }
 
-  /** Livro Excel com três folhas: resumo, teleconsultas e utilizadores. */
+  /** Livro Excel: resumo, pedidos, utilizadores e disponibilidade. */
   function exportWorkbook() {
     const today = new Date();
 
@@ -351,27 +450,35 @@ export default function AdministracaoPage() {
       notes: [
         "Hospital Geral de Mavalane — Telepediatria",
         `Relatório gerado em ${formatDateTime(today.toISOString())}`,
-        "Dados de demonstração do protótipo.",
+        "Dados de demonstração do protótipo académico.",
       ],
-      columns: [{ header: "Indicador", width: 220 }, { header: "Valor", width: 90 }],
+      columns: [{ header: "Indicador", width: 240 }, { header: "Valor", width: 90 }],
       rows: [
         ["Total de pedidos", consultations.length],
-        ["Pendentes", metrics.pending],
-        ["Agendadas", metrics.scheduled],
-        ["Em curso", metrics.inProgress],
-        ["Concluídas", metrics.completed],
-        ["Encaminhadas", metrics.referred],
+        ["Aguardando triagem", metrics.awaitingTriage],
+        ["Triados, por atribuir", metrics.awaitingAssignment],
+        ["Atribuídos, por agendar", metrics.awaitingScheduling],
+        ["Consultas agendadas", metrics.scheduled],
+        ["Consultas em curso", metrics.inProgress],
+        ["Consultas concluídas", metrics.completed],
+        ["Encaminhados para presencial", metrics.referred],
+        ["Cancelados", metrics.cancelled],
         ["Pedidos submetidos por USSD", metrics.fromUssd],
-        ["Teleconsultas por videochamada", metrics.video],
+        ["Pedidos por videochamada", metrics.video],
+        ["Pedidos por áudio", metrics.audio],
+        ["Pedidos por texto", metrics.text],
+        ["Pedidos com prescrição registada", metrics.withPrescription],
         ["Utilizadores registados", users.length],
-        ["Utilizadores activos", users.filter((item) => item.active).length],
-        ["Pediatras na escala", pediatricians.length],
+        ["Contas activas", users.filter((item) => item.state === "ACTIVA").length],
+        ["Contas provisórias (USSD)", provisionalAccounts.length],
+        ["Pediatras na escala", allPediatricians.length],
+        ["Profissionais de triagem", users.filter((item) => item.role === "TRIAGEM").length],
         ["Crianças registadas", children.length],
       ],
     };
 
     const consultationsSheet: Sheet = {
-      name: "Teleconsultas",
+      name: "Pedidos",
       columns: [
         { header: "Referência", width: 80 },
         { header: "Criança", width: 150 },
@@ -380,15 +487,17 @@ export default function AdministracaoPage() {
         { header: "Telefone", width: 120 },
         { header: "Bairro", width: 120 },
         { header: "Sintomas", width: 220 },
-        { header: "Canal", width: 110 },
-        { header: "Prioridade", width: 110 },
-        { header: "Estado", width: 100 },
+        { header: "Canal", width: 120 },
+        { header: "Prioridade", width: 100 },
+        { header: "Estado", width: 190 },
         { header: "Origem", width: 60 },
         { header: "Submetido", width: 130 },
-        { header: "Agendado", width: 130 },
+        { header: "Triagem", width: 140 },
+        { header: "Triado em", width: 130 },
         { header: "Pediatra", width: 150 },
-        { header: "Orientação", width: 260 },
-        { header: "Encaminhamento", width: 260 },
+        { header: "Agendado", width: 130 },
+        { header: "Duração (min)", width: 90 },
+        { header: "Prescrições", width: 80 },
       ],
       rows: consultationRows.map((row) => Object.values(row)),
     };
@@ -398,36 +507,41 @@ export default function AdministracaoPage() {
       columns: [
         { header: "Nome", width: 160 },
         { header: "Email", width: 180 },
-        { header: "Perfil", width: 140 },
+        { header: "Perfil", width: 150 },
         { header: "Telefone", width: 120 },
         { header: "Especialidade", width: 180 },
         { header: "Nº da Ordem", width: 90 },
         { header: "Turno", width: 130 },
         { header: "Disponível", width: 80 },
-        { header: "Estado", width: 80 },
+        { header: "Estado", width: 120 },
         { header: "Registado", width: 100 },
       ],
       rows: userRows.map((row) => Object.values(row)),
     };
 
+    const availabilitySheet: Sheet = {
+      name: "Disponibilidade",
+      columns: [
+        { header: "Pediatra", width: 160 },
+        { header: "Dia", width: 90 },
+        { header: "Início", width: 70 },
+        { header: "Fim", width: 70 },
+        { header: "Duração (min)", width: 90 },
+        { header: "Modalidade", width: 130 },
+        { header: "Tipo", width: 110 },
+        { header: "Estado", width: 90 },
+        { header: "Observações", width: 240 },
+      ],
+      rows: availabilityRows.map((row) => Object.values(row)),
+    };
+
     downloadExcel(
       `hgm-relatorio-${today.toISOString().slice(0, 10)}.xls`,
-      toExcelWorkbook([summary, consultationsSheet, usersSheet]),
+      toExcelWorkbook([summary, consultationsSheet, usersSheet, availabilitySheet]),
     );
-    setFeedback(
-      "Relatório Excel exportado com as folhas Resumo, Teleconsultas e Utilizadores.",
+    showOk(
+      "Relatório Excel exportado com as folhas Resumo, Pedidos, Utilizadores e Disponibilidade.",
     );
-  }
-
-  function handleRemoveUser(target: User) {
-    const result = removeUser(target.id);
-    if (!result.ok) {
-      setFeedback(null);
-      setPageError(result.error);
-      return;
-    }
-    setPageError(null);
-    setFeedback(`${target.name} foi eliminado do sistema.`);
   }
 
   return (
@@ -435,7 +549,7 @@ export default function AdministracaoPage() {
       <AppHeader
         user={user}
         title="Administração"
-        subtitle="Gestão de utilizadores e relatórios institucionais."
+        subtitle="Gestão de utilizadores, contas provisórias e relatórios institucionais."
         actions={
           <Button size="lg" onClick={openCreate}>
             <Plus data-icon="inline-start" />
@@ -445,20 +559,7 @@ export default function AdministracaoPage() {
       />
 
       <PageShell>
-        {feedback ? (
-          <Alert variant="success">
-            <CheckCircle2 />
-            <AlertDescription>{feedback}</AlertDescription>
-          </Alert>
-        ) : null}
-
-        {pageError ? (
-          <Alert variant="destructive">
-            <AlertCircle />
-            <AlertTitle>Operação não permitida</AlertTitle>
-            <AlertDescription>{pageError}</AlertDescription>
-          </Alert>
-        ) : null}
+        <FeedbackAlert feedback={feedback} />
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
@@ -466,13 +567,14 @@ export default function AdministracaoPage() {
             value={users.length}
             icon={Users}
             tone="primary"
-            hint={`${users.filter((item) => item.active).length} activos`}
+            hint={`${users.filter((item) => item.state === "ACTIVA").length} com acesso activo`}
           />
           <StatCard
-            label="Crianças registadas"
-            value={children.length}
-            icon={ShieldCheck}
-            tone="success"
+            label="Contas provisórias"
+            value={provisionalAccounts.length}
+            icon={KeyRound}
+            tone={provisionalAccounts.length > 0 ? "warning" : "default"}
+            hint="Criadas por pedidos USSD"
           />
           <StatCard
             label="Pedidos via USSD"
@@ -480,18 +582,71 @@ export default function AdministracaoPage() {
             icon={Smartphone}
           />
           <StatCard
-            label="Videochamadas"
-            value={metrics.video}
-            icon={Video}
-            tone="primary"
+            label="Crianças registadas"
+            value={children.length}
+            icon={ShieldCheck}
+            tone="success"
           />
         </section>
+
+        {/* Contas provisórias do USSD — activação (§11) */}
+        {provisionalAccounts.length > 0 ? (
+          <section className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/8">
+            <div className="border-b border-border px-5 py-4">
+              <h2 className="font-bold tracking-tight">
+                Contas provisórias do Simulador USSD
+              </h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Contas criadas automaticamente a partir de pedidos USSD de números
+                ainda não registados. Não iniciam sessão: precisam de ser activadas
+                com email e palavra-passe definitivos.
+              </p>
+            </div>
+
+            <ul className="divide-y divide-border">
+              {provisionalAccounts.map((item) => {
+                const requests = consultations.filter(
+                  (entry) => entry.guardianId === item.id,
+                );
+
+                return (
+                  <li
+                    key={item.id}
+                    className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-semibold">{item.name}</p>
+                      <p className="mt-0.5 text-sm text-muted-foreground">
+                        {item.phone} ·{" "}
+                        {requests.length === 1
+                          ? "1 pedido associado"
+                          : `${requests.length} pedidos associados`}
+                        {requests.length > 0
+                          ? ` (${requests.map((entry) => entry.reference).join(", ")})`
+                          : ""}
+                      </p>
+                    </div>
+
+                    <Button size="sm" onClick={() => openActivate(item)}>
+                      <KeyRound data-icon="inline-start" />
+                      Activar conta
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
 
         <Tabs defaultValue="utilizadores">
           <TabsList>
             <TabsTrigger value="utilizadores">
               <Users />
-              Gestão de utilizadores
+              Utilizadores
+            </TabsTrigger>
+            <TabsTrigger value="escala">
+              <CalendarCheck2 />
+              Escala
             </TabsTrigger>
             <TabsTrigger value="relatorios">
               <Activity />
@@ -501,76 +656,6 @@ export default function AdministracaoPage() {
 
           {/* --- Utilizadores --- */}
           <TabsContent value="utilizadores" className="mt-5 space-y-4">
-            {/*
-              Escala de pediatria: especialidade, turno e disponibilidade. Os
-              turnos estão distribuídos — nunca aparecem todos disponíveis ao
-              mesmo tempo.
-            */}
-            <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
-              <div className="flex flex-wrap items-baseline justify-between gap-3">
-                <h2 className="font-bold tracking-tight">Escala de pediatras</h2>
-                <p className="text-sm text-muted-foreground">
-                  {pediatricians.filter((item) => item.available && item.active).length}{" "}
-                  de {pediatricians.length} disponíveis neste momento
-                </p>
-              </div>
-
-              <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {pediatricians.map((doctor) => (
-                  <li
-                    key={doctor.id}
-                    className="rounded-xl border border-border p-4"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
-                        <Stethoscope className="size-4" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">
-                          {doctor.name}
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {doctor.specialty ?? "Especialidade por definir"}
-                        </p>
-                      </div>
-                    </div>
-
-                    <dl className="mt-3.5 space-y-1.5 border-t border-border pt-3 text-xs">
-                      <div className="flex justify-between gap-3">
-                        <dt className="text-muted-foreground">Turno</dt>
-                        <dd className="font-medium">
-                          {doctor.shift ? shiftLabels[doctor.shift] : "—"}
-                        </dd>
-                      </div>
-                      <div className="flex justify-between gap-3">
-                        <dt className="text-muted-foreground">Disponibilidade</dt>
-                        <dd
-                          className={cn(
-                            "font-semibold",
-                            doctor.active && doctor.available
-                              ? "text-success"
-                              : "text-muted-foreground",
-                          )}
-                        >
-                          {!doctor.active
-                            ? "Conta inactiva"
-                            : doctor.available
-                              ? "Disponível"
-                              : "Fora de turno"}
-                        </dd>
-                      </div>
-                      <div className="flex justify-between gap-3">
-                        <dt className="text-muted-foreground">Ordem</dt>
-                        <dd className="font-medium">
-                          {doctor.licenseNumber ?? "—"}
-                        </dd>
-                      </div>
-                    </dl>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative min-w-0 flex-1 sm:max-w-md">
                 <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -601,158 +686,216 @@ export default function AdministracaoPage() {
               <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/8">
                 <div className="overflow-x-auto">
                   <TooltipProvider>
-                  <Table className="min-w-[860px]">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Utilizador</TableHead>
-                        <TableHead>Perfil</TableHead>
-                        <TableHead>Contacto</TableHead>
-                        <TableHead>Registado</TableHead>
-                        <TableHead>Estado</TableHead>
-                        <TableHead className="w-32 text-right">Acções</TableHead>
-                      </TableRow>
-                    </TableHeader>
-
-                    <TableBody>
-                      {filteredUsers.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell>
-                            <div className="flex items-center gap-3">
-                              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-bold text-primary">
-                                {initialsOf(item.name)}
-                              </span>
-                              <div className="min-w-0">
-                                <p className="truncate font-medium">{item.name}</p>
-                                <p className="truncate text-xs text-muted-foreground">
-                                  {item.email}
-                                </p>
-                              </div>
-                            </div>
-                          </TableCell>
-
-                          <TableCell>
-                            <Badge
-                              variant="ghost"
-                              className="h-6 px-2 text-[0.6875rem] font-semibold ring-1 ring-border"
-                            >
-                              {shortRoleLabels[item.role]}
-                            </Badge>
-                            {item.specialty ? (
-                              <span className="mt-0.5 block text-xs text-muted-foreground">
-                                {item.specialty}
-                              </span>
-                            ) : null}
-                            {item.shift ? (
-                              <span className="mt-0.5 block text-xs text-muted-foreground">
-                                {shortShiftLabels[item.shift]} ·{" "}
-                                {item.available ? "disponível" : "fora de turno"}
-                              </span>
-                            ) : null}
-                            {item.provisional ? (
-                              <span className="mt-0.5 block text-xs text-warning-foreground">
-                                Conta provisória (pedido USSD)
-                              </span>
-                            ) : null}
-                          </TableCell>
-
-                          <TableCell className="text-muted-foreground">
-                            {item.phone}
-                          </TableCell>
-
-                          <TableCell className="text-muted-foreground">
-                            {formatDate(item.createdAt)}
-                          </TableCell>
-
-                          <TableCell>
-                            <span
-                              className={cn(
-                                "inline-flex items-center gap-1.5 text-xs font-semibold",
-                                item.active ? "text-success" : "text-muted-foreground",
-                              )}
-                            >
-                              <span
-                                className={cn(
-                                  "size-1.5 rounded-full",
-                                  item.active ? "bg-success" : "bg-muted-foreground",
-                                )}
-                              />
-                              {item.active ? "Activo" : "Inactivo"}
-                            </span>
-                          </TableCell>
-
-                          <TableCell>
-                            <div className="flex justify-end gap-1.5">
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="outline"
-                                    size="icon-sm"
-                                    aria-label={`Editar ${item.name}`}
-                                    onClick={() => openEdit(item)}
-                                  >
-                                    <Pencil />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Editar utilizador</TooltipContent>
-                              </Tooltip>
-
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant={item.active ? "destructive" : "outline"}
-                                    size="icon-sm"
-                                    aria-label={
-                                      item.active
-                                        ? `Desactivar ${item.name}`
-                                        : `Activar ${item.name}`
-                                    }
-                                    disabled={item.id === user.id}
-                                    onClick={() => {
-                                      setUserActive(item.id, !item.active);
-                                      setFeedback(
-                                        `${item.name} ${item.active ? "desactivado" : "activado"}.`,
-                                      );
-                                    }}
-                                  >
-                                    {item.active ? <ShieldOff /> : <ShieldCheck />}
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  {item.active ? "Desactivar utilizador" : "Activar utilizador"}
-                                </TooltipContent>
-                              </Tooltip>
-
-                              {/*
-                                Eliminação só para contas sem qualquer
-                                actividade: a store recusa apagar quem tem
-                                pedidos, crianças ou consultas registadas.
-                              */}
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="outline"
-                                    size="icon-sm"
-                                    aria-label={`Eliminar ${item.name}`}
-                                    disabled={item.id === user.id}
-                                    onClick={() => handleRemoveUser(item)}
-                                  >
-                                    <Trash2 />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  Eliminar (só contas sem actividade)
-                                </TooltipContent>
-                              </Tooltip>
-                            </div>
-                          </TableCell>
+                    <Table className="min-w-[980px]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Utilizador</TableHead>
+                          <TableHead>Perfil</TableHead>
+                          <TableHead>Contacto</TableHead>
+                          <TableHead>Registado</TableHead>
+                          <TableHead>Estado da conta</TableHead>
+                          <TableHead className="w-44 text-right">Acções</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+
+                      <TableBody>
+                        {filteredUsers.map((item) => (
+                          <TableRow key={item.id}>
+                            <TableCell>
+                              <div className="flex items-center gap-3">
+                                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-bold text-primary">
+                                  {initialsOf(item.name)}
+                                </span>
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium">{item.name}</p>
+                                  <p className="truncate text-xs text-muted-foreground">
+                                    {item.email}
+                                  </p>
+                                </div>
+                              </div>
+                            </TableCell>
+
+                            <TableCell>
+                              <Badge
+                                variant="ghost"
+                                className="h-6 px-2 text-[0.6875rem] font-semibold ring-1 ring-border"
+                              >
+                                {shortRoleLabels[item.role]}
+                              </Badge>
+                              {item.specialty ? (
+                                <span className="mt-0.5 block text-xs text-muted-foreground">
+                                  {item.specialty}
+                                </span>
+                              ) : null}
+                              {item.shift ? (
+                                <span className="mt-0.5 block text-xs text-muted-foreground">
+                                  {shortShiftLabels[item.shift]} ·{" "}
+                                  {item.available
+                                    ? "disponível no turno"
+                                    : "indisponível no turno"}
+                                </span>
+                              ) : null}
+                            </TableCell>
+
+                            <TableCell className="text-muted-foreground">
+                              {item.phone}
+                            </TableCell>
+
+                            <TableCell className="text-muted-foreground">
+                              {formatDate(item.createdAt)}
+                            </TableCell>
+
+                            <TableCell>
+                              <AccountStateCell
+                                state={item.state}
+                                disabled={item.id === user.id}
+                                onChange={(next) =>
+                                  report(
+                                    setUserState(item.id, next),
+                                    `${item.name}: conta ${accountStateLabels[next].toLowerCase()}.`,
+                                  )
+                                }
+                              />
+                            </TableCell>
+
+                            <TableCell>
+                              <div className="flex justify-end gap-1.5">
+                                {item.state === "PROVISORIA" ? (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => openActivate(item)}
+                                  >
+                                    <KeyRound data-icon="inline-start" />
+                                    Activar
+                                  </Button>
+                                ) : null}
+
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      size="icon-sm"
+                                      aria-label={`Editar ${item.name}`}
+                                      onClick={() => openEdit(item)}
+                                    >
+                                      <Pencil />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Editar utilizador</TooltipContent>
+                                </Tooltip>
+
+                                {/*
+                                  Eliminação só para contas sem qualquer
+                                  actividade: a store recusa apagar quem tem
+                                  pedidos, crianças ou consultas registadas.
+                                */}
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      size="icon-sm"
+                                      aria-label={`Eliminar ${item.name}`}
+                                      disabled={item.id === user.id}
+                                      onClick={() =>
+                                        report(
+                                          removeUser(item.id),
+                                          `${item.name} foi eliminado do sistema.`,
+                                        )
+                                      }
+                                    >
+                                      <Trash2 />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    Eliminar (só contas sem actividade)
+                                  </TooltipContent>
+                                </Tooltip>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   </TooltipProvider>
                 </div>
               </div>
             )}
+          </TabsContent>
+
+          {/* --- Escala --- */}
+          <TabsContent value="escala" className="mt-5 space-y-4">
+            <Alert variant="info">
+              <Info />
+              <AlertTitle>Disponibilidade no momento</AlertTitle>
+              <AlertDescription>
+                Um pediatra só consta como disponível dentro do turno registado ou
+                com uma disponibilidade adicional em vigor. Fora disso, o estado
+                indica se está fora do turno, indisponível ou ausente.
+              </AlertDescription>
+            </Alert>
+
+            <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
+              <div className="flex flex-wrap items-baseline justify-between gap-3">
+                <h2 className="font-bold tracking-tight">Escala de pediatras</h2>
+                <p className="text-sm text-muted-foreground">
+                  {ranked.filter((entry) => entry.available).length} de{" "}
+                  {ranked.length} disponíveis neste momento
+                </p>
+              </div>
+
+              <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {ranked.map((entry) => (
+                  <li
+                    key={entry.doctor.id}
+                    className="rounded-xl border border-border p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">
+                          {entry.doctor.name}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {entry.doctor.specialty ?? "Especialidade por definir"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3">
+                      <AvailabilityBadge status={entry.status} />
+                    </div>
+
+                    <dl className="mt-3.5 space-y-1.5 border-t border-border pt-3 text-xs">
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-muted-foreground">Turno</dt>
+                        <dd className="font-medium">
+                          {entry.doctor.shift
+                            ? shiftLabels[entry.doctor.shift]
+                            : "—"}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-muted-foreground">Ordem</dt>
+                        <dd className="font-medium">
+                          {entry.doctor.licenseNumber ?? "—"}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-muted-foreground">Janelas hoje</dt>
+                        <dd className="font-medium tabular-nums">
+                          {
+                            availability.filter(
+                              (slot) =>
+                                slot.doctorId === entry.doctor.id &&
+                                slot.state === "ACTIVA",
+                            ).length
+                          }
+                        </dd>
+                      </div>
+                    </dl>
+                  </li>
+                ))}
+              </ul>
+            </section>
           </TabsContent>
 
           {/* --- Relatórios --- */}
@@ -762,8 +905,8 @@ export default function AdministracaoPage() {
               <AlertTitle>Gráficos de demonstração</AlertTitle>
               <AlertDescription>
                 Construídos a partir dos pedidos actualmente registados nesta
-                pré-visualização. Em produção, actualizam-se automaticamente
-                sempre que um novo pedido é submetido.
+                pré-visualização. Actualizam-se sempre que um novo pedido é
+                submetido.
               </AlertDescription>
             </Alert>
 
@@ -771,11 +914,10 @@ export default function AdministracaoPage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="font-bold tracking-tight">
-                    Consultas nos últimos 7 dias
+                    Pedidos nos últimos 7 dias
                   </h2>
                   <p className="mt-0.5 text-sm text-muted-foreground">
-                    Calculado a partir dos pedidos registados — actualiza sempre
-                    que entra um novo pedido.
+                    Calculado a partir dos pedidos registados.
                   </p>
                 </div>
 
@@ -800,23 +942,65 @@ export default function AdministracaoPage() {
               </div>
             </section>
 
-            {/*
-              Cinco estados, cinco cartões: no protótipo testado faltava "Em
-              curso" e os totais apresentados somavam menos um pedido do que os
-              que existiam de facto.
-            */}
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-              <StatCard label="Pendentes" value={metrics.pending} icon={Inbox} tone="warning" />
-              <StatCard label="Agendadas" value={metrics.scheduled} icon={CalendarCheck2} tone="primary" />
-              <StatCard label="Em curso" value={metrics.inProgress} icon={Activity} tone="success" />
-              <StatCard label="Concluídas" value={metrics.completed} icon={CheckCircle2} tone="success" />
-              <StatCard label="Encaminhadas" value={metrics.referred} icon={ShieldOff} tone="danger" />
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <StatCard
+                label="Aguardando triagem"
+                value={metrics.awaitingTriage}
+                icon={ClipboardCheck}
+                tone="warning"
+              />
+              <StatCard
+                label="Por atribuir"
+                value={metrics.awaitingAssignment}
+                icon={UserCheck}
+                tone="warning"
+              />
+              <StatCard
+                label="Por agendar"
+                value={metrics.awaitingScheduling}
+                icon={Inbox}
+              />
+              <StatCard
+                label="Agendadas"
+                value={metrics.scheduled}
+                icon={CalendarCheck2}
+                tone="primary"
+              />
+              <StatCard
+                label="Em curso"
+                value={metrics.inProgress}
+                icon={Activity}
+                tone="success"
+              />
+              <StatCard
+                label="Concluídas"
+                value={metrics.completed}
+                icon={CheckCircle2}
+                tone="success"
+              />
+              <StatCard
+                label="Encaminhados"
+                value={metrics.referred}
+                icon={ShieldOff}
+                tone="danger"
+              />
+              <StatCard
+                label="Cancelados"
+                value={metrics.cancelled}
+                icon={Trash2}
+              />
+              <StatCard
+                label="Com prescrição"
+                value={metrics.withPrescription}
+                icon={Video}
+                tone="primary"
+              />
             </section>
 
             <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
               <h2 className="font-bold tracking-tight">Percurso dos pedidos</h2>
               <p className="mt-0.5 text-sm text-muted-foreground">
-                Os cinco estados somam sempre o total de pedidos registados.
+                As fases somam sempre o total de pedidos registados.
               </p>
               <div className="mt-4">
                 <StageChart data={consultations} />
@@ -827,7 +1011,7 @@ export default function AdministracaoPage() {
               <div className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
                 <h2 className="font-bold tracking-tight">Pedidos por prioridade</h2>
                 <p className="mt-0.5 text-sm text-muted-foreground">
-                  Classificação atribuída pela triagem automática.
+                  Classificação atribuída pelos profissionais de triagem.
                 </p>
                 <div className="mt-4">
                   <PriorityChart data={consultations} />
@@ -835,9 +1019,9 @@ export default function AdministracaoPage() {
               </div>
 
               <div className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
-                <h2 className="font-bold tracking-tight">Pedidos por canal</h2>
+                <h2 className="font-bold tracking-tight">Pedidos por modalidade</h2>
                 <p className="mt-0.5 text-sm text-muted-foreground">
-                  Videochamada vs. chamada de voz.
+                  Vídeo, áudio e texto.
                 </p>
                 <div className="mt-6">
                   <BreakdownBars items={channelBreakdown} />
@@ -848,6 +1032,7 @@ export default function AdministracaoPage() {
         </Tabs>
       </PageShell>
 
+      {/* Criar / editar utilizador */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -856,19 +1041,15 @@ export default function AdministracaoPage() {
             </DialogTitle>
             <DialogDescription>
               Os perfis determinam o que cada pessoa vê na plataforma. Nesta
-              pré-visualização sem servidor, as contas criadas ficam guardadas
-              neste navegador — noutro computador ou numa janela anónima, o
-              início de sessão não as encontra.
+              pré-visualização sem servidor, as contas criadas ficam guardadas neste
+              navegador.
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {error ? (
-              <Alert variant="destructive">
-                <AlertCircle />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            ) : null}
+            <FeedbackAlert
+              feedback={error ? { tone: "error", text: error } : null}
+            />
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
@@ -882,9 +1063,10 @@ export default function AdministracaoPage() {
                   aria-required="true"
                   minLength={3}
                   value={form.name}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, name: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    setForm((current) => ({ ...current, name: event.target.value }));
+                    setError(null);
+                  }}
                   className="mt-2 h-11 rounded-xl px-3.5"
                 />
               </div>
@@ -901,9 +1083,10 @@ export default function AdministracaoPage() {
                   required
                   aria-required="true"
                   value={form.email}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, email: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    setForm((current) => ({ ...current, email: event.target.value }));
+                    setError(null);
+                  }}
                   className="mt-2 h-11 rounded-xl px-3.5"
                 />
               </div>
@@ -922,12 +1105,13 @@ export default function AdministracaoPage() {
                   minLength={6}
                   placeholder="Mínimo 6 caracteres"
                   value={form.password}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setForm((current) => ({
                       ...current,
                       password: event.target.value,
-                    }))
-                  }
+                    }));
+                    setError(null);
+                  }}
                   className="mt-2 h-11 rounded-xl px-3.5"
                 />
               </div>
@@ -938,19 +1122,22 @@ export default function AdministracaoPage() {
                 </Label>
                 <Select
                   value={form.role}
-                  onValueChange={(value) =>
-                    setForm((current) => ({ ...current, role: value as UserRole }))
-                  }
+                  onValueChange={(value) => {
+                    setForm((current) => ({ ...current, role: value as UserRole }));
+                    setError(null);
+                  }}
                 >
                   <SelectTrigger id="user-role" className="mt-2 h-11 w-full rounded-xl">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ENCARREGADO">
-                      {roleLabels.ENCARREGADO}
-                    </SelectItem>
-                    <SelectItem value="PEDIATRA">{roleLabels.PEDIATRA}</SelectItem>
-                    <SelectItem value="ADMIN">{roleLabels.ADMIN}</SelectItem>
+                    {(
+                      ["ENCARREGADO", "TRIAGEM", "ADMINISTRATIVO", "PEDIATRA"] as UserRole[]
+                    ).map((role) => (
+                      <SelectItem key={role} value={role}>
+                        {roleLabels[role]}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -967,41 +1154,45 @@ export default function AdministracaoPage() {
                   aria-required="true"
                   placeholder="+258 84 000 0000"
                   value={form.phone}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, phone: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    setForm((current) => ({ ...current, phone: event.target.value }));
+                    setError(null);
+                  }}
                   className="mt-2 h-11 rounded-xl px-3.5"
                 />
               </div>
 
+              {form.role === "PEDIATRA" || form.role === "TRIAGEM" ? (
+                <div className={form.role === "TRIAGEM" ? "sm:col-span-2" : ""}>
+                  <Label htmlFor="user-specialty" className="text-sm font-semibold">
+                    Especialidade
+                  </Label>
+                  <Input
+                    id="user-specialty"
+                    name="user-specialty"
+                    list="especialidades-hgm"
+                    required={form.role === "PEDIATRA"}
+                    aria-required={form.role === "PEDIATRA"}
+                    value={form.specialty}
+                    onChange={(event) => {
+                      setForm((current) => ({
+                        ...current,
+                        specialty: event.target.value,
+                      }));
+                      setError(null);
+                    }}
+                    className="mt-2 h-11 rounded-xl px-3.5"
+                  />
+                  <datalist id="especialidades-hgm">
+                    {specialtySuggestions.map((option) => (
+                      <option key={option} value={option} />
+                    ))}
+                  </datalist>
+                </div>
+              ) : null}
+
               {form.role === "PEDIATRA" ? (
                 <>
-                  <div>
-                    <Label htmlFor="user-specialty" className="text-sm font-semibold">
-                      Especialidade
-                    </Label>
-                    <Input
-                      id="user-specialty"
-                      name="user-specialty"
-                      list="especialidades-hgm"
-                      required
-                      aria-required="true"
-                      value={form.specialty}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          specialty: event.target.value,
-                        }))
-                      }
-                      className="mt-2 h-11 rounded-xl px-3.5"
-                    />
-                    <datalist id="especialidades-hgm">
-                      {specialtySuggestions.map((option) => (
-                        <option key={option} value={option} />
-                      ))}
-                    </datalist>
-                  </div>
-
                   <div>
                     <Label htmlFor="user-license" className="text-sm font-semibold">
                       Nº da Ordem
@@ -1013,12 +1204,13 @@ export default function AdministracaoPage() {
                       aria-required="true"
                       placeholder="OM-0000"
                       value={form.licenseNumber}
-                      onChange={(event) =>
+                      onChange={(event) => {
                         setForm((current) => ({
                           ...current,
                           licenseNumber: event.target.value,
-                        }))
-                      }
+                        }));
+                        setError(null);
+                      }}
                       className="mt-2 h-11 rounded-xl px-3.5"
                     />
                   </div>
@@ -1029,12 +1221,10 @@ export default function AdministracaoPage() {
                     </Label>
                     <Select
                       value={form.shift}
-                      onValueChange={(value) =>
-                        setForm((current) => ({
-                          ...current,
-                          shift: value as Shift,
-                        }))
-                      }
+                      onValueChange={(value) => {
+                        setForm((current) => ({ ...current, shift: value as Shift }));
+                        setError(null);
+                      }}
                     >
                       <SelectTrigger id="user-shift" className="mt-2 h-11 w-full rounded-xl">
                         <SelectValue placeholder="Seleccione o turno" />
@@ -1049,28 +1239,54 @@ export default function AdministracaoPage() {
 
                   <div>
                     <Label htmlFor="user-available" className="text-sm font-semibold">
-                      Disponibilidade
+                      Disponibilidade no turno
                     </Label>
                     <Select
                       value={form.available ? "SIM" : "NAO"}
-                      onValueChange={(value) =>
+                      onValueChange={(value) => {
                         setForm((current) => ({
                           ...current,
                           available: value === "SIM",
-                        }))
-                      }
+                        }));
+                        setError(null);
+                      }}
                     >
-                      <SelectTrigger id="user-available" className="mt-2 h-11 w-full rounded-xl">
+                      <SelectTrigger
+                        id="user-available"
+                        className="mt-2 h-11 w-full rounded-xl"
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="SIM">Disponível no turno</SelectItem>
-                        <SelectItem value="NAO">Fora de turno</SelectItem>
+                        <SelectItem value="NAO">Indisponível no turno</SelectItem>
                       </SelectContent>
                     </Select>
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      Fora do turno registado, o pediatra só aparece disponível se
+                      tiver uma disponibilidade adicional.
+                    </p>
                   </div>
                 </>
               ) : null}
+
+              <div className="sm:col-span-2">
+                <NeighbourhoodField
+                  id="user-address"
+                  label="Bairro"
+                  required={false}
+                  value={form.address}
+                  customValue={form.addressOther}
+                  onChange={(value) => {
+                    setForm((current) => ({ ...current, address: value }));
+                    setError(null);
+                  }}
+                  onCustomChange={(value) => {
+                    setForm((current) => ({ ...current, addressOther: value }));
+                    setError(null);
+                  }}
+                />
+              </div>
             </div>
 
             <DialogFooter>
@@ -1089,6 +1305,182 @@ export default function AdministracaoPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Activar conta provisória (§11) */}
+      <Dialog
+        open={activateTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setActivateTarget(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Activar conta provisória</DialogTitle>
+            <DialogDescription>
+              A conta de {activateTarget?.name} foi criada a partir de um pedido
+              USSD. Defina o email e a palavra-passe definitivos: as credenciais são
+              efectivamente criadas, a conta passa a activa e os pedidos USSD
+              continuam associados a este encarregado.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleActivate} className="space-y-4">
+            <FeedbackAlert
+              feedback={activateError ? { tone: "error", text: activateError } : null}
+            />
+
+            <div className="grid gap-4">
+              <div>
+                <Label htmlFor="activate-name" className="text-sm font-semibold">
+                  Nome do encarregado
+                </Label>
+                <Input
+                  id="activate-name"
+                  value={activateForm.name}
+                  onChange={(event) => {
+                    setActivateForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }));
+                    setActivateError(null);
+                  }}
+                  className="mt-2 h-11 rounded-xl px-3.5"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="activate-email" className="text-sm font-semibold">
+                  Email definitivo
+                </Label>
+                <Input
+                  id="activate-email"
+                  type="email"
+                  required
+                  aria-required="true"
+                  value={activateForm.email}
+                  onChange={(event) => {
+                    setActivateForm((current) => ({
+                      ...current,
+                      email: event.target.value,
+                    }));
+                    setActivateError(null);
+                  }}
+                  placeholder="nome@exemplo.mz"
+                  className="mt-2 h-11 rounded-xl px-3.5"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="activate-password" className="text-sm font-semibold">
+                  Palavra-passe
+                </Label>
+                <Input
+                  id="activate-password"
+                  type="text"
+                  required
+                  aria-required="true"
+                  minLength={6}
+                  value={activateForm.password}
+                  onChange={(event) => {
+                    setActivateForm((current) => ({
+                      ...current,
+                      password: event.target.value,
+                    }));
+                    setActivateError(null);
+                  }}
+                  placeholder="Mínimo 6 caracteres"
+                  className="mt-2 h-11 rounded-xl px-3.5"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="activate-document" className="text-sm font-semibold">
+                  Documento de identificação{" "}
+                  <span className="font-normal text-muted-foreground">
+                    (opcional)
+                  </span>
+                </Label>
+                <Input
+                  id="activate-document"
+                  value={activateForm.idDocument}
+                  onChange={(event) => {
+                    setActivateForm((current) => ({
+                      ...current,
+                      idDocument: event.target.value,
+                    }));
+                    setActivateError(null);
+                  }}
+                  placeholder="BI / DIRE / Passaporte"
+                  className="mt-2 h-11 rounded-xl px-3.5"
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                onClick={() => setActivateTarget(null)}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" size="lg">
+                <KeyRound data-icon="inline-start" />
+                Activar conta
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
+  );
+}
+
+/**
+ * Estado da conta. Uma conta provisória não pode ser activada por aqui: tem de
+ * passar pela activação com credenciais definitivas.
+ */
+function AccountStateCell({
+  state,
+  disabled,
+  onChange,
+}: {
+  state: AccountState;
+  disabled: boolean;
+  onChange: (state: AccountState) => void;
+}) {
+  if (state === "PROVISORIA") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-warning-foreground">
+        <span className="size-1.5 rounded-full bg-warning" />
+        {accountStateLabels.PROVISORIA}
+      </span>
+    );
+  }
+
+  return (
+    <Select
+      value={state}
+      disabled={disabled}
+      onValueChange={(value) => onChange(value as AccountState)}
+    >
+      <SelectTrigger
+        className={cn(
+          "h-9 w-36 rounded-lg text-xs",
+          state === "ACTIVA" ? "text-success" : "text-muted-foreground",
+        )}
+        aria-label="Estado da conta"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {assignableStates.map((option) => (
+          <SelectItem key={option} value={option}>
+            {accountStateLabels[option]}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

@@ -18,7 +18,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { Consultation } from "@/lib/types/consultation";
-import { getTodayAgenda } from "@/lib/utils/consultations";
+import type { User } from "@/lib/types/user";
+import { getTodayAgenda, primaryActionFor } from "@/lib/utils/consultations";
 import { describeAgeYears, formatLongDate, formatTime } from "@/lib/utils/date";
 import { cn } from "@/lib/utils";
 
@@ -30,7 +31,13 @@ import { cn } from "@/lib/utils";
  * agendadas para hoje, separadas entre as que ainda estão por realizar e as que
  * já passaram — e o canal (voz / vídeo) é explícito.
  */
-export function TodayAgenda({ data }: { data: Consultation[] }) {
+export function TodayAgenda({
+  data,
+  viewer,
+}: {
+  data: Consultation[];
+  viewer: User;
+}) {
   const agenda = getTodayAgenda(data);
   const [tab, setTab] = useState<"upcoming" | "past">("upcoming");
 
@@ -88,7 +95,7 @@ export function TodayAgenda({ data }: { data: Consultation[] }) {
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <Table className="min-w-[820px]">
+          <Table className="min-w-[920px]">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-20">Hora</TableHead>
@@ -98,7 +105,7 @@ export function TodayAgenda({ data }: { data: Consultation[] }) {
                 <TableHead>Canal</TableHead>
                 <TableHead>Prioridade</TableHead>
                 <TableHead>Estado</TableHead>
-                <TableHead className="w-24 text-right">Acção</TableHead>
+                <TableHead className="w-40 text-right">Acção</TableHead>
               </TableRow>
             </TableHeader>
 
@@ -126,7 +133,11 @@ export function TodayAgenda({ data }: { data: Consultation[] }) {
                   </TableCell>
                   <TableCell className="text-right">
                     <Button asChild variant="outline" size="sm">
-                      <Link href={`/teleconsultas/${item.id}`}>Abrir</Link>
+                      <Link
+                        href={`/teleconsultas/${item.id}?tab=${primaryActionFor(viewer, item).tab}`}
+                      >
+                        {primaryActionFor(viewer, item).label}
+                      </Link>
                     </Button>
                   </TableCell>
                 </TableRow>

@@ -8,23 +8,23 @@ import { Button } from "@/components/ui/button";
 export const metadata: Metadata = {
   title: "Contacto",
   description:
-    "Contactos do serviço de telepediatria do Hospital Geral de Mavalane: emergência pediátrica, canal USSD e apoio à plataforma.",
+    "Contactos do serviço de telepediatria do Hospital Geral de Mavalane: apoio à plataforma, Simulador USSD e horários de atendimento.",
 };
 
 const channels = [
   {
     icon: PhoneCall,
-    label: "Emergência pediátrica",
-    value: "1420",
+    label: "Emergência",
+    value: "Serviços de emergência oficiais",
     detail:
-      "Disponível 24 horas. Perante sintomas críticos, ligue e dirija-se à unidade sanitária mais próxima.",
+      "Em caso de sintomas graves, dirija-se imediatamente à unidade sanitária mais próxima ou contacte os serviços de emergência oficialmente disponíveis.",
   },
   {
     icon: Smartphone,
-    label: "Canal USSD",
-    value: "*123#",
+    label: "Simulador USSD",
+    value: "*123# (demonstrativo)",
     detail:
-      "Marque no telemóvel, com ou sem internet, para submeter um pedido de teleconsulta pediátrica.",
+      "Simulação integrada no protótipo académico. O código é apenas demonstrativo e ainda não está disponível para utilização direta num telemóvel.",
   },
   {
     icon: Mail,
@@ -44,7 +44,7 @@ const channels = [
     label: "Turnos de teleconsulta",
     value: "07h–13h · 13h–19h · 19h–07h",
     detail:
-      "Fora do turno, os pedidos ficam na fila de triagem e são atendidos por ordem de prioridade.",
+      "Fora do turno, os pedidos ficam na fila de triagem e são analisados por um profissional de saúde por ordem de chegada.",
   },
 ];
 
@@ -53,13 +53,13 @@ export default function ContactoPage() {
     <DocumentPage
       eyebrow="Falar com o HGM"
       title="Contactos do serviço de telepediatria."
-      intro="Para uma emergência, ligue 1420 ou dirija-se imediatamente à unidade sanitária mais próxima. Para tudo o resto, use um dos canais abaixo."
+      intro="A telepediatria não substitui os serviços de emergência. Em caso de sintomas graves, dirija-se imediatamente à unidade sanitária mais próxima ou contacte os serviços de emergência oficialmente disponíveis. Para tudo o resto, use um dos canais abaixo."
       sections={[
         {
           heading: "Antes de contactar",
           bullets: [
-            "Se a criança apresenta convulsões, falta de ar, perda de consciência ou sangramento intenso, não aguarde resposta: dirija-se de imediato a uma unidade sanitária.",
-            "Para saber o estado de um pedido, marque *123# e escolha «Ver os meus pedidos», ou entre na sua conta.",
+            "Se a criança apresenta convulsões, dificuldade em respirar, perda de consciência ou sangramento, não aguarde resposta: dirija-se de imediato a uma unidade sanitária.",
+            "Para saber o estado de um pedido, entre na sua conta — ou experimente o percurso no Simulador USSD, em «Ver os meus pedidos».",
             "Tenha à mão a referência do pedido (por exemplo, R-1042) — é por ela que a equipa localiza o processo.",
           ],
         },
@@ -98,7 +98,7 @@ export default function ContactoPage() {
             <Link href="/registo">Criar conta</Link>
           </Button>
           <Button asChild size="xl" variant="outline" className="rounded-lg">
-            <Link href="/ussd">Abrir o simulador USSD</Link>
+            <Link href="/ussd">Abrir Simulador USSD</Link>
           </Button>
         </div>
       </section>

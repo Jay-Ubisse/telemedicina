@@ -4,7 +4,6 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  AlertCircle,
   ArrowLeft,
   ArrowRight,
   BadgeCheck,
@@ -21,17 +20,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { maputoNeighbourhoods } from "@/lib/data/locations";
+  NeighbourhoodField,
+  resolveNeighbourhood,
+} from "@/components/forms/neighbourhood-field";
+import { FeedbackAlert } from "@/components/layout/feedback-alert";
 import { MAX_AGE_YEARS } from "@/lib/data/symptoms";
+import { useFeedback } from "@/lib/hooks/use-feedback";
 import { useClinicStore } from "@/lib/store/clinic-store";
 import { ageInYears } from "@/lib/utils/date";
-import { validateChildAge } from "@/lib/utils/triage";
+import { validateChildAge } from "@/lib/utils/intake";
 import { cn } from "@/lib/utils";
 
 /**
@@ -52,7 +49,10 @@ type FormState = {
   passwordConfirm: string;
   phone: string;
   idDocument: string;
+  /** Bairro escolhido na lista, ou o sentinela da opção «Outro». */
   address: string;
+  /** Bairro escrito à mão quando a opção escolhida é «Outro». */
+  addressOther: string;
   childName: string;
   childBirthDate: string;
   childSex: "M" | "F" | "";
@@ -67,6 +67,7 @@ const emptyForm: FormState = {
   phone: "",
   idDocument: "",
   address: "",
+  addressOther: "",
   childName: "",
   childBirthDate: "",
   childSex: "",
@@ -103,11 +104,15 @@ export function RegisterView() {
 
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * As mensagens desaparecem sozinhas e são descartadas assim que o utilizador
+   * mexe num campo — era o que faltava no protótipo testado (§12 do relatório).
+   */
+  const { feedback, showError, clear } = useFeedback();
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((previous) => ({ ...previous, [key]: value }));
-    setError(null);
+    clear();
   }
 
   function validateStep(index: number): string | null {
@@ -132,8 +137,10 @@ export function RegisterView() {
       if (form.idDocument.trim().length < 5) {
         return "Indique o número do documento de identificação.";
       }
-      if (!form.address.trim()) {
-        return "Seleccione o bairro de residência.";
+      if (!resolveNeighbourhood(form.address, form.addressOther)) {
+        return form.address === ""
+          ? "Seleccione o bairro de residência."
+          : "Escreva o nome do bairro de residência.";
       }
       return null;
     }
@@ -154,15 +161,15 @@ export function RegisterView() {
   function goNext() {
     const problem = validateStep(step);
     if (problem) {
-      setError(problem);
+      showError(problem);
       return;
     }
-    setError(null);
+    clear();
     setStep((value) => Math.min(value + 1, stepsMeta.length - 1));
   }
 
   function goBack() {
-    setError(null);
+    clear();
     setStep((value) => Math.max(value - 1, 0));
   }
 
@@ -178,7 +185,7 @@ export function RegisterView() {
 
     const problem = validateStep(2);
     if (problem) {
-      setError(problem);
+      showError(problem);
       return;
     }
 
@@ -188,7 +195,7 @@ export function RegisterView() {
       password: form.password,
       phone: form.phone,
       idDocument: form.idDocument,
-      address: form.address,
+      address: resolveNeighbourhood(form.address, form.addressOther),
       child: {
         name: form.childName,
         birthDate: form.childBirthDate,
@@ -199,7 +206,7 @@ export function RegisterView() {
 
     if (!result.ok) {
       // Um email duplicado só é detectado no fim; volta ao passo da conta.
-      setError(result.error);
+      showError(result.error);
       setStep(0);
       return;
     }
@@ -273,12 +280,7 @@ export function RegisterView() {
         </p>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-5">
-          {error ? (
-            <Alert variant="destructive">
-              <AlertCircle />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          ) : null}
+          <FeedbackAlert feedback={feedback} />
 
           {step === 0 ? (
             <>
@@ -339,7 +341,7 @@ export function RegisterView() {
                 value={form.phone}
                 onChange={(value) => update("phone", value)}
                 placeholder="+258 84 000 0000"
-                hint="É para este número que enviamos o link e as confirmações por SMS."
+                hint="É o número de contacto do pedido. As notificações do atendimento são apresentadas na plataforma."
               />
               <Field
                 id="register-id-document"
@@ -349,41 +351,13 @@ export function RegisterView() {
                 onChange={(value) => update("idDocument", value)}
                 placeholder="BI / DIRE / Passaporte"
               />
-              {/*
-                Bairro em lista fechada: não se recolhe rua nem número de
-                porta — só o necessário para organizar o atendimento.
-              */}
-              <div className="space-y-2">
-                <Label htmlFor="register-address" className="text-sm font-semibold">
-                  Bairro
-                  <span aria-hidden className="ml-0.5 text-destructive">
-                    *
-                  </span>
-                </Label>
-                <Select
-                  value={form.address}
-                  onValueChange={(value) => update("address", value)}
-                >
-                  <SelectTrigger
-                    id="register-address"
-                    aria-required="true"
-                    className="h-11 w-full rounded-xl"
-                  >
-                    <SelectValue placeholder="Seleccione o bairro" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {maputoNeighbourhoods.map((bairro) => (
-                      <SelectItem key={bairro} value={bairro}>
-                        {bairro}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  O serviço opera na cidade de Maputo. Não é recolhida a rua nem
-                  o número de residência.
-                </p>
-              </div>
+              <NeighbourhoodField
+                id="register-address"
+                value={form.address}
+                customValue={form.addressOther}
+                onChange={(value) => update("address", value)}
+                onCustomChange={(value) => update("addressOther", value)}
+              />
             </>
           ) : null}
 

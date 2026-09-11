@@ -33,7 +33,7 @@
   /* Gráficos: severidade da triagem e percurso do pedido. */
   --color-chart-critica: var(--chart-critica);
   --color-chart-urgente: var(--chart-urgente);
-  --color-chart-avaliacao: var(--chart-avaliacao);
+  --color-chart-sem-triagem: var(--chart-sem-triagem);
   --color-chart-normal: var(--chart-normal);
   --color-chart-stage-1: var(--chart-stage-1);
   --color-chart-stage-2: var(--chart-stage-2);
@@ -113,8 +113,9 @@
    */
   --chart-critica: oklch(58% 0.21 27);
   --chart-urgente: oklch(68% 0.155 72);
-  --chart-avaliacao: oklch(52% 0.16 245);
   --chart-normal: oklch(58% 0.15 155);
+  /* Pedidos ainda sem triagem: neutro, porque não têm classificação clínica. */
+  --chart-sem-triagem: oklch(52% 0.16 245);
 
   /* Percurso do pedido: rampa sequencial de um só tom, clara → escura. */
   --chart-stage-1: oklch(84% 0.05 245);
@@ -184,8 +185,8 @@
    */
   --chart-critica: oklch(55% 0.20 25);
   --chart-urgente: oklch(66% 0.15 88);
-  --chart-avaliacao: oklch(60% 0.14 245);
   --chart-normal: oklch(62% 0.15 155);
+  --chart-sem-triagem: oklch(60% 0.14 245);
 
   --chart-stage-1: oklch(36% 0.07 245);
   --chart-stage-2: oklch(45% 0.10 245);
