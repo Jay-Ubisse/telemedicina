@@ -114,7 +114,7 @@ export const seedUsers: User[] = [
   // --- administrativo -----------------------------------------------------
   {
     id: "USR-003",
-    name: "Joaquim Ubisse",
+    name: "Administração HGM",
     email: "admin@hgm.mz",
     password: DEMO_PASSWORD,
     role: "ADMINISTRATIVO",
