@@ -4,23 +4,17 @@ import { useMemo, useState } from "react";
 import {
   Activity,
   CalendarCheck2,
-  CheckCircle2,
-  ClipboardCheck,
   Download,
   FileSpreadsheet,
-  Inbox,
   Info,
   KeyRound,
   Pencil,
   Plus,
   Search,
   ShieldCheck,
-  ShieldOff,
   Smartphone,
   Trash2,
-  UserCheck,
   Users,
-  Video,
 } from "lucide-react";
 
 import { BreakdownBars } from "@/components/dashboard/breakdown-bars";
@@ -940,61 +934,6 @@ export default function AdministracaoPage() {
               <div className="mt-6">
                 <VolumeChart data={consultations} />
               </div>
-            </section>
-
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              <StatCard
-                label="Aguardando triagem"
-                value={metrics.awaitingTriage}
-                icon={ClipboardCheck}
-                tone="warning"
-              />
-              <StatCard
-                label="Por atribuir"
-                value={metrics.awaitingAssignment}
-                icon={UserCheck}
-                tone="warning"
-              />
-              <StatCard
-                label="Por agendar"
-                value={metrics.awaitingScheduling}
-                icon={Inbox}
-              />
-              <StatCard
-                label="Agendadas"
-                value={metrics.scheduled}
-                icon={CalendarCheck2}
-                tone="primary"
-              />
-              <StatCard
-                label="Em curso"
-                value={metrics.inProgress}
-                icon={Activity}
-                tone="success"
-              />
-              <StatCard
-                label="Concluídas"
-                value={metrics.completed}
-                icon={CheckCircle2}
-                tone="success"
-              />
-              <StatCard
-                label="Encaminhados"
-                value={metrics.referred}
-                icon={ShieldOff}
-                tone="danger"
-              />
-              <StatCard
-                label="Cancelados"
-                value={metrics.cancelled}
-                icon={Trash2}
-              />
-              <StatCard
-                label="Com prescrição"
-                value={metrics.withPrescription}
-                icon={Video}
-                tone="primary"
-              />
             </section>
 
             <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
