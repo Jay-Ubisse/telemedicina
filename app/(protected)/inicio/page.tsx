@@ -32,7 +32,6 @@ import { AppHeader } from "@/components/layout/app-header";
 import { EmergencyNotice } from "@/components/layout/emergency-notice";
 import { EmptyState, PageShell } from "@/components/layout/page-shell";
 import { useSession } from "@/components/layout/session-provider";
-import { NotificationsPanel } from "@/components/notifications/notifications-panel";
 import { AvailabilityBadge } from "@/components/telemedicine/availability-badge";
 import { ChannelBadge } from "@/components/telemedicine/channel-badge";
 import { PriorityBadge } from "@/components/telemedicine/priority-badge";
@@ -66,9 +65,9 @@ import { describeAge, formatDateTime, timeAgo } from "@/lib/utils/date";
 /**
  * Painel inicial.
  *
- * Há um painel por perfil, com a fila de trabalho que lhe pertence e uma área de
- * notificações (§9 do relatório). Nenhum painel mostra mais do que o perfil está
- * autorizado a ver.
+ * Há um painel por perfil, com a fila de trabalho que lhe pertence. As
+ * notificações (§9 do relatório) ficam no ícone do cabeçalho. Nenhum painel
+ * mostra mais do que o perfil está autorizado a ver.
  */
 export default function InicioPage() {
   const user = useSession();
@@ -240,7 +239,6 @@ function GuardianHome({
               )}
             </div>
 
-            <NotificationsPanel user={user} />
 
             <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/8">
               <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
@@ -405,7 +403,6 @@ function TriageHome({ consultations }: { consultations: Consultation[] }) {
           </div>
 
           <div className="space-y-6">
-            <NotificationsPanel user={user} />
             <EmergencyNotice />
           </div>
         </section>
@@ -508,7 +505,6 @@ function AdministrativeHome({ consultations }: { consultations: Consultation[] }
           </div>
 
           <div className="space-y-6">
-            <NotificationsPanel user={user} />
 
             <section className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/8">
               <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
@@ -665,7 +661,6 @@ function DoctorHome({ consultations }: { consultations: Consultation[] }) {
               </Button>
             </section>
 
-            <NotificationsPanel user={user} />
           </div>
         </section>
 

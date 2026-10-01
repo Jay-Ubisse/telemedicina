@@ -1,6 +1,5 @@
 import {
   Baby,
-  Bell,
   CalendarClock,
   ClipboardCheck,
   ClipboardList,
@@ -77,13 +76,6 @@ export const navItems: NavItem[] = [
     icon: FileHeart,
     roles: ["ENCARREGADO", "TRIAGEM", "ADMINISTRATIVO", "PEDIATRA"],
     description: "Pedidos encerrados",
-  },
-  {
-    title: "Notificações",
-    href: "/notificacoes",
-    icon: Bell,
-    roles: ["ENCARREGADO", "TRIAGEM", "ADMINISTRATIVO", "PEDIATRA"],
-    description: "Notificações internas",
   },
   {
     title: "Administração",
