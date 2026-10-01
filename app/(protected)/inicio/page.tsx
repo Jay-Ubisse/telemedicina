@@ -495,8 +495,8 @@ function AdministrativeHome({ consultations }: { consultations: Consultation[] }
             <section className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8">
               <h2 className="font-bold tracking-tight">Percurso dos pedidos</h2>
               <p className="mt-0.5 text-sm text-muted-foreground">
-                Do pedido submetido ao caso encerrado. A barra completa corresponde
-                ao total de pedidos registados.
+                Do pedido submetido ao caso encerrado — quantos pedidos estão em
+                cada fase.
               </p>
               <div className="mt-4">
                 <StageChart data={consultations} />

@@ -243,50 +243,64 @@ const stageConfig = Object.fromEntries(
   stages.map((stage) => [stage.key, { label: stage.label, color: stage.color }]),
 ) satisfies ChartConfig;
 
+/**
+ * Uma barra horizontal por fase, pela ordem do percurso. Barras separadas em vez
+ * de uma única barra empilhada: comparar comprimentos a partir da mesma base é
+ * mais fiável do que comparar segmentos encostados uns aos outros, e as fases
+ * com poucos pedidos não desaparecem como fatias estreitas.
+ */
 export function StageChart({ data }: { data: Consultation[] }) {
-  const counts = useMemo(() => {
-    const row: Record<string, number | string> = { linha: "Pedidos" };
-    for (const stage of stages) {
-      row[stage.key] = data.filter((item) =>
-        stage.statuses.includes(item.status),
-      ).length;
-    }
-    return [row];
-  }, [data]);
+  const points = useMemo(
+    () =>
+      stages.map((stage) => ({
+        key: stage.key,
+        fase: stage.label,
+        total: data.filter((item) => stage.statuses.includes(item.status))
+          .length,
+        fill: `var(--color-${stage.key})`,
+      })),
+    [data],
+  );
 
   const total = data.length;
 
   return (
     <div>
-      <ChartContainer config={stageConfig} className="aspect-auto h-24 w-full">
+      <ChartContainer config={stageConfig} className="aspect-auto h-64 w-full">
         <BarChart
           accessibilityLayer
           layout="vertical"
-          data={counts}
-          margin={{ left: 0, right: 0, top: 0, bottom: 0 }}
-          barSize={44}
+          data={points}
+          margin={{ left: 4, right: 34 }}
         >
-          <XAxis type="number" hide />
-          <YAxis type="category" dataKey="linha" hide />
-          <ChartTooltip content={<ChartTooltipContent indicator="dot" />} />
-          {stages.map((stage, index) => (
-            <Bar
-              key={stage.key}
-              dataKey={stage.key}
-              stackId="percurso"
-              fill={`var(--color-${stage.key})`}
-              stroke="var(--card)"
-              strokeWidth={2}
-              isAnimationActive={false}
-              radius={
-                index === 0
-                  ? [8, 0, 0, 8]
-                  : index === stages.length - 1
-                    ? [0, 8, 8, 0]
-                    : 0
-              }
+          <CartesianGrid horizontal={false} strokeDasharray="3 3" />
+          <XAxis type="number" dataKey="total" hide allowDecimals={false} />
+          <YAxis
+            type="category"
+            dataKey="fase"
+            tickLine={false}
+            axisLine={false}
+            width={176}
+          />
+          <ChartTooltip
+            cursor={false}
+            content={<ChartTooltipContent hideLabel nameKey="key" />}
+          />
+          <Bar
+            dataKey="total"
+            radius={4}
+            barSize={22}
+            minPointSize={2}
+            isAnimationActive={false}
+          >
+            <LabelList
+              dataKey="total"
+              position="right"
+              offset={10}
+              className="fill-foreground"
+              fontSize={12}
             />
-          ))}
+          </Bar>
         </BarChart>
       </ChartContainer>
 
@@ -314,7 +328,7 @@ export function StageChart({ data }: { data: Consultation[] }) {
               </span>
             </span>
             <span className="font-semibold tabular-nums">
-              {counts[0][stage.key] as number}
+              {points.find((point) => point.key === stage.key)?.total}
             </span>
           </li>
         ))}
