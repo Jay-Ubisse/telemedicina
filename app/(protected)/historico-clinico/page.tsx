@@ -133,12 +133,9 @@ export default function HistoricoClinicoPage() {
             />
           </div>
         ) : (
-          <ol className="space-y-4">
+          <ol className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/8">
             {history.map((item) => (
-              <li
-                key={item.id}
-                className="rounded-2xl bg-card p-5 ring-1 ring-foreground/8"
-              >
+              <li key={item.id} className="p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h2 className="font-bold tracking-tight">
@@ -163,7 +160,7 @@ export default function HistoricoClinicoPage() {
                   </div>
                 </div>
 
-                <dl className="mt-5 grid gap-5 border-t border-border pt-5 lg:grid-cols-3">
+                <dl className="mt-4 grid gap-5 lg:grid-cols-3">
                   <div>
                     <dt className="text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
                       Sintomas
