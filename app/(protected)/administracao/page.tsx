@@ -911,7 +911,8 @@ export default function AdministracaoPage() {
                     Pedidos nos últimos 7 dias
                   </h2>
                   <p className="mt-0.5 text-sm text-muted-foreground">
-                    Calculado a partir dos pedidos registados.
+                    Por dia, os urgentes e críticos ao lado dos restantes
+                    pedidos.
                   </p>
                 </div>
 
@@ -932,7 +933,7 @@ export default function AdministracaoPage() {
               </div>
 
               <div className="mt-6">
-                <VolumeChart data={consultations} />
+                <VolumeChart data={consultations} grouped />
               </div>
             </section>
 

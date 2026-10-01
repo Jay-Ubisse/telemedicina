@@ -53,11 +53,21 @@ const volumeConfig = {
 /**
  * Pedidos por dia nos últimos sete dias.
  *
- * Colunas empilhadas em vez de duas linhas: os urgentes são um subconjunto do
- * total, por isso a altura da coluna é o total do dia e o segmento de baixo diz
- * quanto desse total exigiu prioridade.
+ * Por omissão, colunas empilhadas em vez de duas linhas: os urgentes são um
+ * subconjunto do total, por isso a altura da coluna é o total do dia e o
+ * segmento de baixo diz quanto desse total exigiu prioridade.
+ *
+ * Com `grouped`, as duas séries ficam lado a lado, cada uma a partir da base —
+ * a leitura passa a ser a comparação directa entre urgentes e restantes em cada
+ * dia (é a vista dos relatórios da administração).
  */
-export function VolumeChart({ data }: { data: Consultation[] }) {
+export function VolumeChart({
+  data,
+  grouped = false,
+}: {
+  data: Consultation[];
+  grouped?: boolean;
+}) {
   const points = useMemo(
     () =>
       getDailyVolume(data, 7).map((entry) => ({
@@ -73,7 +83,12 @@ export function VolumeChart({ data }: { data: Consultation[] }) {
 
   return (
     <ChartContainer config={volumeConfig} className="aspect-auto h-64 w-full">
-      <BarChart accessibilityLayer data={points} margin={{ top: 12, left: -18 }}>
+      <BarChart
+        accessibilityLayer
+        data={points}
+        margin={{ top: 12, left: -18 }}
+        barGap={grouped ? 0 : undefined}
+      >
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
         <XAxis
           dataKey="dia"
@@ -93,19 +108,22 @@ export function VolumeChart({ data }: { data: Consultation[] }) {
           content={<ChartTooltipContent indicator="dot" />}
         />
         <ChartLegend content={<ChartLegendContent />} />
-        {/* Contorno da cor do cartão: 2px de folga entre segmentos empilhados. */}
+        {/*
+          Contorno da cor do cartão: 2px de folga entre segmentos empilhados ou
+          entre colunas vizinhas.
+        */}
         <Bar
           dataKey="urgentes"
-          stackId="pedidos"
+          stackId={grouped ? undefined : "pedidos"}
           fill="var(--color-urgentes)"
           stroke="var(--card)"
           strokeWidth={2}
-          radius={[0, 0, 4, 4]}
+          radius={grouped ? [4, 4, 0, 0] : [0, 0, 4, 4]}
           isAnimationActive={false}
         />
         <Bar
           dataKey="restantes"
-          stackId="pedidos"
+          stackId={grouped ? undefined : "pedidos"}
           fill="var(--color-restantes)"
           stroke="var(--card)"
           strokeWidth={2}
